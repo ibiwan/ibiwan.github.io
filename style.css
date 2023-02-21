@@ -1,0 +1,56 @@
+body {
+    margin: 0;
+}
+
+.root {
+    width: 1160px;
+    background-color: lightslategray;
+}
+
+.container {
+    display: flex;
+    justify-content: space-around;
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.col {
+    flex-direction: column;
+    justify-content: space-evenly;
+}
+
+.button {
+    font-size: larger;
+    margin: 5px;
+    padding: 5px;
+    border: 1px solid black;
+    width: 6em;
+    height: 4em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: teal;
+}
+
+.highlighted {
+    background-color: aqua;
+}
+
+.special {
+    height: 6em;
+    background-color: crimson;
+}
+
+* {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
