@@ -282,10 +282,20 @@ export function anchorWorld(item, boneFrame, anchorName) {
   q = rotate(q, f.angle);
 
   return {
-    // an anchor is a point, so it has no direction of its own -- it inherits
+    // An anchor is a point, so it has no direction of its own -- it inherits
     // the art's, which is what makes a bone on a weapon's grip turn with the
-    // weapon
+    // weapon.
+    //
+    // That direction is the one the ORIGIN->DIRECTION anchors define, which in
+    // world terms is the host frame plus `item.angle` -- the angle you asked
+    // the art to point at. Returning `spin` instead reported the art's
+    // correction rather than its facing, so art whose anchors ran at 30 degrees
+    // in its own coordinates handed every anchor an angle 30 degrees out.
+    //
+    // No special case is needed for a missing or coincident direction anchor:
+    // artDirection is 0 there, so spin collapses to item.angle and the two
+    // agree anyway.
     pos: v2(q.x + f.pos.x, q.y + f.pos.y),
-    angle: f.angle + spin,
+    angle: f.angle + item.angle,
   };
 }

@@ -264,6 +264,11 @@ store.subscribe((doc, view) => {
   for (const mode of ['rest', 'solve', 'pose', 'anim']) {
     document.getElementById(`mode-${mode}`).classList.toggle('active', view.mode === mode);
   }
+  // the inspector shows four different things -- say which
+  document.getElementById('inspector-title').textContent = {
+    bone: 'bone', art: 'art', anim: 'animation', keyframe: 'keyframe',
+  }[doc.selection?.kind] ?? 'inspector';
+
   document.body.classList.toggle('mode-solve', view.mode === 'solve');
   document.body.classList.toggle('mode-pose', view.mode === 'pose');
   document.body.classList.toggle('mode-anim', view.mode === 'anim');

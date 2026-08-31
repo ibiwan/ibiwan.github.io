@@ -57,9 +57,34 @@ export function ensureEndpoints(anim) {
   anim.keyframes.sort((a, b) => a.frame - b.frame);
 }
 
-// clamp or remove keyframes that fall outside the new length
-export function trimKeyframes(anim) {
-  anim.keyframes = anim.keyframes.filter((k) => k.frame < anim.length);
+// Retime an animation, MOVING its end pose rather than dropping it.
+//
+// The end key is the only one an author cannot reposition by hand -- it is
+// mandatory, so dragging it is refused -- which means changing the length has
+// to be the way to move it. Filtering it out and re-adding an empty one
+// destroyed the pose on shortening and stranded it mid-animation on
+// lengthening, leaving the animation to end on a key that had never been posed.
+//
+// Interior keys past the new end are still dropped: they are unreachable, and
+// there is nowhere sensible to put them.
+export function setLength(anim, next) {
+  const length = Math.max(2, Math.round(Number(next) || 2));
+  const oldEnd = anim.length - 1;
+  const newEnd = length - 1;
+  anim.length = length;
+
+  if (needsEndFrame(anim.type) && newEnd !== oldEnd) {
+    const end = anim.keyframes.find((k) => k.frame === oldEnd);
+    if (end) {
+      // whatever sat on the destination gives way -- the end pose is the one
+      // the type promises, so it wins the collision
+      anim.keyframes = anim.keyframes.filter((k) => k !== end && k.frame !== newEnd);
+      end.frame = newEnd;
+      anim.keyframes.push(end);
+    }
+  }
+
+  anim.keyframes = anim.keyframes.filter((k) => k.frame <= newEnd);
   ensureEndpoints(anim);
 }
 

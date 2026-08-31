@@ -31,6 +31,9 @@ export function createStore(initial) {
   const undoStack = [];
   const redoStack = [];
   let lastCoalesce = null;
+  // bumped on every document mutation. baking a scene is expensive, so the
+  // preview caches it against this rather than re-deriving a signature.
+  let version = 0;
 
   const subscribers = new Set();
 
@@ -59,6 +62,7 @@ export function createStore(initial) {
   return {
     get doc() { return doc; },
     get view() { return view; },
+    get version() { return version; },
     get canUndo() { return undoStack.length > 0; },
     get canRedo() { return redoStack.length > 0; },
 
@@ -82,6 +86,7 @@ export function createStore(initial) {
       const next = mutator(doc);
       if (next !== undefined) doc = next;
 
+      version += 1;
       persist();
       notify();
     },
@@ -100,6 +105,7 @@ export function createStore(initial) {
       redoStack.push(snapshot());
       doc = undoStack.pop();
       lastCoalesce = null;
+      version += 1;
       persist();
       notify();
     },
@@ -109,6 +115,7 @@ export function createStore(initial) {
       undoStack.push(snapshot());
       doc = redoStack.pop();
       lastCoalesce = null;
+      version += 1;
       persist();
       notify();
     },
@@ -118,6 +125,7 @@ export function createStore(initial) {
       redoStack.length = 0;
       lastCoalesce = null;
       doc = next;
+      version += 1;
       persist();
       notify();
     },

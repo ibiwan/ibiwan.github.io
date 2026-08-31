@@ -266,6 +266,11 @@
       font-size: .9em;
     }
 
+    em>code {
+      border: 3px solid var(--rule);
+      font-style: normal;
+    }
+
     :not(pre)>code {
       padding: .1em .3em;
       background: var(--code);
@@ -331,191 +336,202 @@
 
 # tauroid rigger
 
-A browser tool for building 2D skeletons, pinning artwork to them, and animating
+A browser tool for building 2D skeletons, pinning paper-doll artwork to them, and animating
 the result. It exports a clean zipped-text bundle, loadable by this tool and by the Tauroid engine.
 
-No install, no dependencies, no build step. It is plain HTML, CSS and ES modules.
+---
+
+## Access
+
+### Hosted
+
+https://ibiwan.github.io/tauroid/rigger/index.html
+
+### Source and Self-Host (easy)
+
+https://github.com/ibiwan/tauroid/tree/master/tools/rigger
 
 ---
 
-## Running it
+## Core Concepts
 
-ES module imports are blocked over `file://`, so it has to be served:
+### Anchors
 
-```bash
-cd tools/rigger && python3 -m http.server 8017
-```
+An **`anchor`** is a point in space that things can be attached to. 
 
-Then open <http://localhost:8017>.
+* There are currently four types of anchors: `world`, `root`, `tip`, `art`.
 
-If you open the file directly you get an explanatory error page rather than a
-blank screen. If the page loads but nothing works, hard-reload — `python3 -m
-http.server` sends no cache headers, so the browser may be holding old scripts.
+* The **`world`** frame origin is the anchor that is available first and always.
 
-Your work is saved to `localStorage` continuously. Closing the tab does not lose
-it. Use **export** for anything you want to keep.
+### Bones
 
----
+A **`bone`** is the core entity of all rigging skeletons and animation.
 
-## The core idea
+* A bone consists of an anchor reference, an angle (degrees), and a length.
 
-There is **one entity type: the bone.** A bone is:
+* A bone inherits the angle from its anchor, then rest and pose angles are added to that.
+    * If a bone is part of a solved system, the solution's angle will override the above sum.
 
-| field | meaning |
-|---|---|
-| `ref` | what it hangs off |
-| `offset` | x/y in the parent's coordinates |
-| `restAngle` | bind direction, relative to the parent's direction |
-| `poseAngle` | delta from rest |
-| `length` | extent along its own direction — **may be zero** |
+* A bone inherits its **`root`** position from its anchor, offset by x/y values in the parent anchor's coordinate system.
+    * Anchor another bone from a root to form a branch.
 
-A zero-length bone is still a bone. It has a direction and no extent, which is
-how you express a grip, a socket, a mount, or an IK target. There is no second
-entity type for those, so there is nothing to confuse them with.
+* Length can be 0, allowing a bone to act as a simple reference frame definition.
+    * Use for grips, sockets, mounts, or solution targets (IK, Aim).
 
-Direction and length are stored separately rather than as a tip position,
-because at length 0 a tip has no derivable direction.
+* A bone's **`tip`** anchor is computed from the root, angle, and length.
+    * Anchor another bone from a tip to form a chain.
 
-### What a bone can hang off
+### Art
 
-Four things, and they are interchangeable everywhere — parents, IK targets, art
-attachment all offer the same list:
+This tool currently natively speaks only SVG.  An art file can be added by dragging onto the window or by clicking *`+`* next to "Art in Scene".
 
-- **world origin**
-- **another bone's root** — an explicit frame, independent of that bone's
-  length. This is how you branch.
-- **another bone's tip** — an implicit anchor that *tracks* the parent's length.
-  Lengthen the parent and the child follows.
-- **an art anchor** — a named point on a piece of artwork. The bone inherits the
-  art's rotation, so a hand on a weapon's grip turns with the weapon.
+* Any file added twice will be handled as independent instances and can be placed and attached independently.
+
+* The ordering in the "Art in Scene" list is the z-ordering for render; move a graphic up or down in the list to reorder occlusion.
+
+* An **`art`** anchor is a named point added to a graphic for use in attaching and targeting.
+    * Click *`+ anchor`* while a graphic is selected to add a green anchor dot at the graphic's origin.  
+    You can drag it to any point on the graphic, and name it in the Inspector view (right pane).
+    You can add any number of anchors to a graphic; usual would be one for a root point and one to define a direction.
+
 
 ---
 
-## The four modes
+## The Four Modes
 
-Each mode adds exactly one thing to the one before it. Cycle with `` ` ``.
+Cycle with *`\``*.
 
-| mode | shows | edits |
+| mode | shows | edits affect |
 |---|---|---|
-| **rest** | the raw bind pose | bind pose |
-| **solve** | bind pose **+ IK solved** | bind pose |
-| **pose** | + pose deltas | pose deltas |
-| **anim** | + animation deltas | keyframes |
+| **rest** | the default skeletal arrangement created with bone bindings | bone bindings |
+| **solve** | bind pose **+ constraints (aim, reach, match)** | bone bindings |
+| **pose** | custom pose within constraints | pose deltas |
+| **anim** | animation: generated poses within constraints | keyframe poses |
 
-The dim skeleton behind the bright one is always the **raw bind pose**, so in
+### Rest
+
+The dim skeleton behind the bright one is always the **rest position**, so in
 any mode you can see how far things have moved from it.
+
+### Solve
 
 **solve** is the one to build a rig in. You edit rest exactly as in rest mode —
 drag joints, set lengths — but constraints re-solve live as you drag, so you can
-see whether the IK actually works while you are still setting it up.
+see whether the solver actually works while you are still setting it up.
+
+### Pose, Anim
 
 In **pose** and **anim**, dragging rotates only. A pose is a rotation delta;
 stretching a bone at pose time would bake a length change into an animation.
 
 ---
 
-## Building a skeleton
+## Building a Skeleton
 
-1. **+ root** adds a bone at the world origin.
-2. Select it, then use **+ at tip** or **+ at root** in the inspector to grow the
-   chain.
-   - *at tip* — the child tracks this bone's length.
-   - *at root* — the child is independent of it. Use this to branch.
-3. Drag the **filled circle** (a bone's root) to move it.
-4. Drag the **hollow orange circle** (its tip) to aim and set length at once.
-5. A zero-length bone has no tip to grab, so it gets a **tick** you drag to
-   rotate.
-6. Hold **shift** while aiming to snap to 45° in world space.
-7. Double-click a name in the hierarchy to rename it.
+1. *`+ root`* adds a bone at the world origin.
+2. Select it, then use *`+ sibling`*, *`+ at tip`*, or *`+ at root`* in the inspector to grow the tree
+   - *at tip* — the child is offset by this bone's extent and inherits its angle.
+   - *at root* — the child inherits this bone's position and angle.
+   - *sibling* — the child inherits the parent's position and angle.
+3. Drag the **filled circle** (a bone's root) to move it (and change the bone's offset x/y values)
+4. Drag the **hollow orange circle** (its tip) to set angle and length at once.
+  - A zero-length bone has no tip to grab, so it gets a **shaded circle** you drag to rotate.
+  - Hold *`shift`* while aiming to snap to 45° in world space.
+5. Double-click a name in the hierarchy to rename it in the inspector.
+6. A bone's reference anchor can be changed using the drop-down in the inspector.
 
-Bones have a fat invisible hit line, so you can click anywhere along the shaft.
-The joint and tip discs sit on top and win near the ends.
-
-### Locks
-
-Each of *offset x*, *offset y*, *rest angle* and *length* has a padlock. A locked
-field cannot be changed by hand — the inspector input is disabled and dragging
-skips it. Locks are **per-axis**: lock x and the root still slides freely in y.
-
-Locks guard manual edits only. **The IK solver and posing are unaffected**,
-because neither writes to these fields — constraints are evaluated rather than
-stored, and posing writes `poseAngle`.
-
-Use them for bind-pose data you are done with and do not want to nudge by
-accident.
+Bones have a wide hit line, so you can click anywhere along the line to select them.
+When multiple anchors overlap, selecting a bone lets you drag that bone's endpoints.
 
 ---
 
-## Artwork
+### Locks
 
-Drop SVG files anywhere on the window, or use **+** next to *art in scene*.
+In the Inspector, each of *offset x*, *offset y*, *rest angle* and *length* has a padlock. A locked field cannot be changed by hand — the inspector input is disabled and dragging skips it. Locks are **per-axis**: lock x and the root still slides freely in y.
 
-Each art item owns its own copy of the markup, so dropping the same file twice
-gives two independent items. There is no asset library to reconcile.
+Locks guard manual edits only. **The IK solver and posing are unaffected**, because neither writes to these fields — constraints are evaluated rather than stored, and posing writes `poseAngle`.
 
-The list order **is** the z-order — top of the list is nearest the viewer. Use
-the ▲▼ buttons to restack.
+Use them for bind-pose data you are done with and do not want to nudge by accident, or to constrain edits to only one or another field.
 
-### Anchors
+---
 
-Anchors are **just named points**. They have no roles baked in. The same anchor
-can act as an origin on one binding, a grip on another.
+## Attaching Art to the Skeleton
 
-1. Select an art item — anchors only appear while their own item is selected.
-2. **+ anchor** drops one at the art's origin. Drag it into place.
-3. Choose which anchor is **origin** (where the art sits) and which is
-   **direction** (which way it points) on the binding, in the inspector.
-4. **download .svg** writes the anchor group back into the file, leaving the
-   artwork untouched.
+1. Add art to scene (drag file to UI or select with *`+`*)
+2. Add anchors to the graphic - an "origin" anchor and "direction" anchor is usually a good start.
+    1. Select graphic in "Art in Scene" pane
+    2. Select *`+ anchor`* in the Inspector
+    3. Name the anchor in the Inspector
+    4. Drag the anchor on the graphic to its location
+      1. All anchors in an unattached graphic will have direction defined relative to world.
+3. Attach the graphic to an anchor in the scene
+    1. Select target anchor (usually a bone root) from "attached to" drop-down in Inspector.
+      1. All anchors in an attached graphic will have direction defined relative to the target anchor.
+    2. Select an art anchor in the "origin" drop-down to position the graphic relative to the target anchor
+    3. Select an art anchor in the "direction" drop-down to orient the graphic relative to the target anchor
+    4. Optionally adjust the "scale" slider to resize the graphic; its origin and direction will stay consistent.
 
-Anchors are written into exported SVGs, so a piece of art carries its own
-attachment points to the next person who opens it.
+Anchors are **just named point/direction tuples**. They have no roles baked in. The same anchor
+can act as an origin on one binding, a grip on another, a direction on another. The direction can be explicit (bone anchors), implicit (world or art anchors), or solved from constraints.
+
+You can click `*download .svg`* to retrieve a copy of the graphic with the anchors baked in for future use.
+
+---
 
 ### For whoever is drawing the art
 
-Three things that cause real problems, worth putting in a brief:
+A couple things that cause real problems, worth putting in a brief:
 
 - **Presentation attributes, not internal CSS.** Illustrator's `.st0`-style
   class names are document-scoped. The tool namespaces them, but plain
   attributes are simpler and more predictable.
-- **Unique object IDs.** Gradients and clip paths are referenced by id; two
-  files sharing an id will collide. The tool prefixes them per item, but unique
-  ids avoid the question.
 - **Responsive OFF.** The tool needs an explicit `viewBox` with width and height
   to place the art.
 
 ---
 
-## Constraints (IK)
+## Constraints
 
-Select a bone and pick a **solve** kind in the inspector. Three kinds, and they
-are different promises rather than a link count:
+Select a bone and pick a *`solve`* kind from the drop-down in the inspector.
 
-**aim** — one angle. Points this bone at the target.
+Options are `pose`, `aim`, `reach`, `match`
 
-**reach** — two angles. Puts this bone's *tip* on the target, using this bone
-and its parent. Law of cosines. The **bend** button flips between the two
-solutions, which mirror about the root-to-target line. Adding a joint between
-the two makes it a three-joint problem, which this cannot solve — that is a
-breaking change to the rig, not a setting.
+No numeric inverse-kinematics solves are currently supported.
 
-**match** — copies position and angle from the target, component by component.
-Each of x, y and angle can be taken or left, with an offset. Anything left
-unchecked keeps whatever the bone's normal placement gives it.
+### pose
 
-Match's x/y can be measured two ways:
+Bone's angle is set by parent/rest/pose angles, summed. Not dynamic.
 
-- **in the target's frame** (default) — an offset means the same thing after the
-  rig turns. Labelled *forward* and *lateral*.
-- **along world axes** — only does what you mean while the rig is axis-aligned.
+### aim
 
-Targets can be any bone root, bone tip, or art anchor. Anything that would
-resolve back through the chain it drives is filtered out of the list rather than
-allowed and then explained.
+Bone's angle is set by a target anchor, such that the bone points at the target.
 
-Constraints are **evaluated, never stored**. Removing one leaves no residue.
-They solve iteratively to a fixed point, so a constraint pointed at another
-constrained bone sees the solved answer, not a stale one.
+### reach
+
+Controls *two* angles, that of the current bone and its parent. 
+Closed-form Inverse Kinematics is used to attempt to put this bone's tip on the target anchor.
+
+* Solve is accomplished using Law of cosines
+* The *`bend`* button controls which solution is selected, e.g. which way an elbow should bend.
+* Falls back to `aim` mode if either bone's length is zero.
+
+### match
+
+Copies values from the target anchor.
+* Each of x, y, angle is available to be matched, selectable independently.
+* Offsets can be applied to each matched value, set independently.
+* X and Y can be measured in the world's frame (horizontal, vertical), or in the target anchor's frame (forward, lateral).
+
+---
+
+### Notes
+
+* Targets can be any bone root, bone tip, or art anchor. 
+* Any descendant of the constrained bone cannot be a target. 
+  * Any invalid constraints encountered will not be computed and will raise a warning.
+  * Constraints themselves do not count as ancestry linkages for the purposes of this rule.
+* Constraints are evaluated, and emitted as part of yaml output, but are not stored in the skeleton definition.
+* Mutually-dependent constraints attempt to solve iteratively, and stop at an undefined balance point if (constraint count + 1) tries are exhausted before settling.
 
 ---
 
@@ -534,7 +550,7 @@ Animations are independent oscillators. Each runs on its own period. A 5-frame
 and a 7-frame loop line up again every 35 frames without anyone authoring 35
 frames of anything.
 
-### Three types
+### Types
 
 | type | start pose | end pose | behaviour |
 |---|---|---|---|
@@ -544,15 +560,13 @@ frames of anything.
 
 A forward loop needs no end pose because its start pose *is* its end pose.
 
-### Working with it
+### Working with animations
 
-1. **+** next to *animations* creates one. Set its type and length.
-2. Tick its checkbox to put it in the lane view.
-3. Click empty track to add a keyframe there; click a dot to select it.
-4. With a keyframe selected, the inspector lists every bone. **+** adds a delta
-   for that bone; **×** removes it.
-5. Orange dots are the mandatory start/end poses and cannot be deleted. Change
-   the type or length instead.
+1. Click *`+`* next to *animations* creates a new animation. Set its type and length in the Inspector.
+2. Tick its checkbox to put it in the lane view and include it in preview.
+3. With an animation selected, click anywhere on its track to add a keyframe at that point; click a dot to select it.
+4. With a keyframe selected, the inspector lists every bone. *`+`* adds a delta for that bone; *`×`* removes it.
+5. Orange dots are the mandatory start/end poses and cannot be deleted. Change the type or length instead.
 
 ### Rotation direction
 
@@ -629,7 +643,7 @@ back to world rather than vanishing.
 
 | file | what it is |
 |---|---|
-| `skeleton.yaml` | engine-facing. Resolved rest pose, world positions, degrees. |
+| `skeleton.yaml` | engine-facing. Resolved rest pose, world positions, degrees. Constraints, and animated Baked positions. |
 | `rig.json` | the authoring graph — refs, anchors, inline markup. |
 | `art/*.svg` | every art item with its anchors written in. |
 
@@ -649,16 +663,6 @@ their output into the rest skeleton would make it un-editable downstream.
 
 Old bundles open. Anything from schema v3 onward migrates forward on load;
 anything older is refused with a reason rather than half-loaded.
-
----
-
-## Tests
-
-```bash
-cd tools/rigger && node test.mjs
-```
-
-The model is DOM-free, so this needs no browser and no dependencies.
 
   </script>
 
@@ -697,7 +701,7 @@ The model is DOM-free, so this needs no browser and no dependencies.
 
       let html = "";
       let paragraph = [];
-      let list = null;
+      let list = [];
       let quote = [];
       let fence = null;
 
@@ -709,15 +713,50 @@ The model is DOM-free, so this needs no browser and no dependencies.
       };
 
       const flushList = () => {
-        if (!list) return;
+        if (!list.length) return;
 
-        html += `<${list.type}>`;
-        for (const item of list.items) {
-          html += `<li>${inline(item)}</li>`;
+        const roots = [];
+        const stack = [{ depth: -1, children: roots }];
+
+        for (const item of list) {
+          while (stack.at(-1).depth >= item.depth) {
+            stack.pop();
+          }
+
+          const node = { ...item, children: [] };
+          stack.at(-1).children.push(node);
+          stack.push(node);
         }
-        html += `</${list.type}>`;
 
-        list = null;
+        const renderListItems = items => {
+          let rendered = "";
+
+          for (let i = 0; i < items.length;) {
+            const type = items[i].type;
+            const group = [];
+
+            while (i < items.length && items[i].type === type) {
+              group.push(items[i]);
+              i++;
+            }
+
+            rendered += `<${type}>`;
+
+            for (const item of group) {
+              rendered +=
+                `<li>${inline(item.text)}` +
+                renderListItems(item.children) +
+                `</li>`;
+            }
+
+            rendered += `</${type}>`;
+          }
+
+          return rendered;
+        };
+
+        html += renderListItems(roots);
+        list = [];
       };
 
       const flushQuote = () => {
@@ -851,33 +890,33 @@ The model is DOM-free, so this needs no browser and no dependencies.
           continue;
         }
 
-        // unordered list
-        const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+        // Lists use two source spaces per nesting level.
+        const unordered = line.match(/^([ \t]*)[-+*]\s+(.+)$/);
         if (unordered) {
           flushParagraph();
           flushQuote();
 
-          if (!list || list.type !== "ul") {
-            flushList();
-            list = { type: "ul", items: [] };
-          }
-
-          list.items.push(unordered[1]);
+          const indentation = unordered[1].replaceAll("\t", "  ").length;
+          list.push({
+            type: "ul",
+            depth: Math.floor(indentation / 2),
+            text: unordered[2]
+          });
           continue;
         }
 
         // ordered list
-        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        const ordered = line.match(/^([ \t]*)\d+[.)]\s+(.+)$/);
         if (ordered) {
           flushParagraph();
           flushQuote();
 
-          if (!list || list.type !== "ol") {
-            flushList();
-            list = { type: "ol", items: [] };
-          }
-
-          list.items.push(ordered[1]);
+          const indentation = ordered[1].replaceAll("\t", "  ").length;
+          list.push({
+            type: "ol",
+            depth: Math.floor(indentation / 2),
+            text: ordered[2]
+          });
           continue;
         }
 
@@ -898,11 +937,27 @@ The model is DOM-free, so this needs no browser and no dependencies.
 
     function inline(text) {
       const code = [];
+      const escapedBackticks = [];
+
+      // Protect backslash-escaped backticks so they cannot open a code span.
+      text = text.replace(/\\`/g, () => {
+        const marker = `\u0000BACKTICK${escapedBackticks.length}\u0000`;
+        escapedBackticks.push("`");
+        return marker;
+      });
 
       text = escapeHtml(text);
 
-      // protect inline code first
-      text = text.replace(/`([^`]+)`/g, (_, value) => {
+      // A run of N backticks closes only with another run of N backticks.
+      // This allows: ``code containing a ` backtick``
+      text = text.replace(/(`+)([\s\S]*?)\1/g, (_, delimiter, value) => {
+        value = value.replace(/\s+/g, " ");
+
+        // Match Markdown's optional padding around code-span content.
+        if (value.startsWith(" ") && value.endsWith(" ") && /[^ ]/.test(value)) {
+          value = value.slice(1, -1);
+        }
+
         const marker = `\u0000CODE${code.length}\u0000`;
         code.push(`<code>${value}</code>`);
         return marker;
@@ -933,6 +988,12 @@ The model is DOM-free, so this needs no browser and no dependencies.
       text = text.replace(
         /\u0000CODE(\d+)\u0000/g,
         (_, index) => code[Number(index)]
+      );
+
+      // Restore literal backticks after all other inline formatting.
+      text = text.replace(
+        /\u0000BACKTICK(\d+)\u0000/g,
+        (_, index) => escapedBackticks[Number(index)]
       );
 
       return text.replace(/\n/g, " ");

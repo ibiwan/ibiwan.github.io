@@ -191,9 +191,14 @@ function resolveOnce(doc, posed, overrides, deltas) {
       const rest = Number.isFinite(b.restAngle) ? b.restAngle : 0;
       let pose = posed && Number.isFinite(b.poseAngle) ? b.poseAngle : 0;
 
-      // animation deltas are just more pose: they add rather than replace, so
-      // several animations touching one bone compose without fighting
-      const d = posed ? deltas?.[b.id] : null;
+      // Animation deltas add rather than replace, so several animations
+      // touching one bone compose without fighting.
+      //
+      // Independent of `posed`: a delta is measured from REST, because that is
+      // what the export's bind pose contains and what the engine will compose
+      // against. Gating it on poseAngle would make a baked pose land wherever
+      // the last manual drag happened to leave the bone.
+      const d = deltas?.[b.id] ?? null;
       const offset = d ? v2(base.x + d.offsetX, base.y + d.offsetY) : base;
       if (d) pose += d.angle;
 
@@ -294,11 +299,13 @@ export function subtree(doc, id) {
 // resolveFrames rather than something posing switches on.
 export const editsRest = (mode) => mode === 'rest' || mode === 'solve';
 export const solvesIk = (mode) => mode !== 'rest';
-export const frameOpts = (mode, deltas = null) => ({
-  posed: !editsRest(mode),
-  constraints: solvesIk(mode),
-  deltas: mode === 'anim' ? deltas : null,
-});
+// `anim` is the odd one: its deltas are BAKED, meaning the solve is already
+// folded into them, so it neither applies poseAngle nor re-runs constraints.
+// That is precisely the engine's view -- rest plus tweened channels, no solver
+// -- which is what makes the preview honest about what will ship.
+export const frameOpts = (mode, deltas = null) => (mode === 'anim'
+  ? { posed: false, constraints: false, deltas }
+  : { posed: !editsRest(mode), constraints: solvesIk(mode), deltas: null });
 
 // --- drag decomposition -----------------------------------------------------
 
@@ -396,7 +403,11 @@ export function constraintProblem(doc, bone) {
     if (Math.abs(bone.offset.x) > 1e-6 || Math.abs(bone.offset.y) > 1e-6) {
       return 'reach needs a zero offset, so the joint sits at the parent’s tip';
     }
-    if (bone.length <= 1e-6 || parent.length <= 1e-6) return 'reach needs both bones to have length';
+    // one zero-length link is fine -- it degenerates to an aim. two is not:
+    // there is no extent anywhere, so nothing can be moved onto the target.
+    if (bone.length <= 1e-6 && parent.length <= 1e-6) {
+      return 'reach needs length on this bone or its parent';
+    }
     chain.push(parent.id);
   }
 
@@ -436,9 +447,13 @@ export function solveConstraints(doc, baseFrames) {
     // output and freeze at whatever the first pass happened to produce, so a
     // partially-matched bone would stop following its parent.
     const host = baseFrames.get(refKey(bone.ref)) ?? IDENTITY;
+    // Position only. No angle: every solver here is closed-form, so none of
+    // them needs a seed, and folding poseAngle in would imply the pose biases
+    // a solve when it does not. `reach` picks its branch from the explicit
+    // `bend` flag rather than from whichever solution is nearer the current
+    // pose -- which is what stops it popping when the chain crosses straight.
     const self = {
       pos: add(host.pos, rotate(bone.offset ?? v2(0, 0), host.angle)),
-      angle: host.angle + (bone.restAngle ?? 0) + (bone.poseAngle ?? 0),
     };
 
     if (c.kind === 'match') {
@@ -485,6 +500,25 @@ export function solveConstraints(doc, baseFrames) {
     // chain toward it, not produce NaN
     const d = Math.min(L1 + L2, Math.max(Math.abs(L1 - L2), len(toTarget)));
     if (d <= 1e-9) continue;
+
+    // A zero-length link is not a broken reach, it is a reach with one joint
+    // instead of two -- so it degenerates to an aim rather than being refused.
+    // The law of cosines below divides by L1 and by L1*L2, which is the only
+    // reason these need handling separately.
+    if (L1 <= 1e-6 && L2 <= 1e-6) continue;      // no extent anywhere: nothing to solve
+    if (L2 <= 1e-6) {
+      // this bone has no extent, so its tip IS the parent's tip: putting that
+      // on the target is the whole solve, and this bone's own angle is left to
+      // its rest and pose rather than being invented
+      put(parent.id, { angle: angleOf(toTarget) });
+      continue;
+    }
+    if (L1 <= 1e-6) {
+      // the parent has no extent, so this bone's root is already pinned and it
+      // simply aims itself -- the parent's angle drives nothing here
+      put(bone.id, { angle: angleOf(toTarget) });
+      continue;
+    }
 
     const unit = (x) => Math.min(1, Math.max(-1, x));
     const alpha = Math.acos(unit((d * d + L1 * L1 - L2 * L2) / (2 * d * L1))) / DEG;

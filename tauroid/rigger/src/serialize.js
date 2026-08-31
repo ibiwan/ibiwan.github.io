@@ -8,8 +8,16 @@
 //   json -- the tool's own round-trip: the authoring graph, refs intact.
 
 import { resolveFrames, boneKey, isPoint } from './skeleton.js';
+import { bakeAnimation } from './bake.js';
+import { loopPeriod } from './animation.js';
 import { fmt, wrapDeg } from './math.js';
 import { normalizeDoc, SCHEMA } from './store.js';
+
+const refYaml = (ref) => {
+  if (ref?.art != null) return `{ art: ${ref.art}, anchor: ${JSON.stringify(ref.anchor)} }`;
+  if (ref?.bone != null) return `{ bone: ${ref.bone}, end: ${ref.end ?? 'root'} }`;
+  return 'null';
+};
 
 export function exportYaml(doc, artPaths = null) {
   // the raw bind pose: constraints are an authoring aid, and baking their
@@ -25,6 +33,11 @@ export function exportYaml(doc, artPaths = null) {
     '# frames between keys interpolate linearly; animations that overlap on a',
     '# bone add, so composition order does not matter. a forward loop wraps from',
     '# its last key to frame 0; back-and-forth reverses at its last frame.',
+    '#',
+    '# each animation carries BOTH: `keyframes` is what was authored, `baked` is',
+    '# the same motion with constraints already solved, split per bone per',
+    '# channel as [frame, value, d|t] -- d designed, t generated to keep a',
+    '# linear tween faithful. Play `baked` and no solver is needed.',
     'bones:',
   ];
   if (!doc.bones.length) out[out.length - 1] = 'bones: []';
@@ -40,6 +53,24 @@ export function exportYaml(doc, artPaths = null) {
     out.push(`    angle: ${fmt(wrapDeg(f.angle), 3)}`);
     out.push(`    length: ${fmt(b.length, 3)}`);
     if (isPoint(b)) out.push('    attachment: true');
+
+    // The authoring constraint, emitted for completeness. The baked animation
+    // below already has the solve applied, so an engine that only tweens can
+    // ignore this entirely -- it is here so nothing about the rig is hidden,
+    // and so a runtime-driven target (an aim that follows the player) can be
+    // re-solved live if that is ever wanted.
+    const c = b.constraint;
+    if (c) {
+      out.push('    constraint:');
+      out.push(`      kind: ${c.kind}`);
+      out.push(`      target: ${refYaml(c.target)}`);
+      if (c.kind === 'reach') out.push(`      bend: ${c.bend >= 0 ? 1 : -1}`);
+      if (c.kind === 'match') {
+        out.push(`      space: ${c.space ?? 'local'}`);
+        out.push(`      take: [${['x', 'y', 'theta'].filter((k) => c.take?.[k]).join(', ')}]`);
+        out.push(`      offset: [${fmt(c.offset?.x ?? 0, 3)}, ${fmt(c.offset?.y ?? 0, 3)}, ${fmt(c.offset?.theta ?? 0, 3)}]`);
+      }
+    }
   }
 
   // art is emitted in PAINT order, back to front, so the engine draws the list
@@ -88,6 +119,24 @@ export function exportYaml(doc, artPaths = null) {
         }
       } else {
         out.push('        deltas: {}');
+      }
+    }
+
+    // BAKED: the solve already applied, as per-channel keys an engine can
+    // simply tween. Channels are independent, so a bone whose angle is pinned
+    // by a theta match keeps two keys while its position gets as many as the
+    // arc needs. `d` marks a key you drew, `t` one computed to keep the tween
+    // honest -- the solve is not linear, so the authored keys alone are not
+    // enough to reproduce it.
+    const baked = bakeAnimation(doc, anim);
+    const ids = Object.keys(baked);
+    out.push(ids.length ? '    baked:' : '    baked: {}');
+    for (const id of ids) {
+      out.push(`      ${id}:`);
+      for (const [ch, keys] of Object.entries(baked[id])) {
+        const snake = ch === 'offsetX' ? 'offset_x' : ch === 'offsetY' ? 'offset_y' : ch;
+        const cells = keys.map((k) => `[${k.frame}, ${fmt(k.value, 3)}, ${k.designed ? 'd' : 't'}]`);
+        out.push(`        ${snake}: [${cells.join(', ')}]`);
       }
     }
   }

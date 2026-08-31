@@ -9,7 +9,7 @@ import {
 import { artById, anchorNamed } from './art.js';
 import { fmt, wrapDeg } from './math.js';
 import {
-  makeDelta, animById, needsEndFrame, trimKeyframes, ensureEndpoints, poseAt,
+  makeDelta, animById, needsEndFrame, setLength, ensureEndpoints, poseAt,
 } from './animation.js';
 
 const selBone = (doc, id) => doc.selection?.kind === 'bone' && doc.selection.id === id;
@@ -275,7 +275,10 @@ export function createInspector(root, store, { onDownload } = {}) {
     kindRow.append(Object.assign(document.createElement('span'), { textContent: 'solve' }));
     const kindSel = document.createElement('select');
     for (const [value, label] of [
-      ['', 'none'],
+      // not "none": an unconstrained bone is still driven by something, namely
+      // the pose angle. there is one angle, and either you set it or a solver
+      // does -- naming the empty case after what actually drives it says so.
+      ['', 'pose'],
       ['aim', 'aim (1 angle)'],
       ['reach', 'reach (2 angles)'],
       ['match', 'match (copy from target)'],
@@ -295,7 +298,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     if (bone.constraint) {
       // aim at anything a bone can hang off: a bone root, a bone tip, or an
       // art anchor. exclude whatever resolves through this chain -- a target
-      // that rides what it drives is circular, and filtering the list beats
+      // that resolves through what it drives is circular, and filtering the list beats
       // explaining the symptom later.
       const chain = [bone.id];
       if (bone.constraint.kind === 'reach' && bone.ref?.bone) chain.push(bone.ref.bone);
@@ -387,24 +390,39 @@ export function createInspector(root, store, { onDownload } = {}) {
     const actions = document.createElement('div');
     actions.className = 'row';
 
-    const add = (label, end, title) => {
+    // `refOf` decides what the new bone hangs off: a child of this bone, or --
+    // for a sibling -- whatever THIS bone hangs off.
+    const add = (label, refOf, title) => {
       const btn = Object.assign(document.createElement('button'), { textContent: label });
       btn.title = title;
       btn.onclick = () => store.update((d) => {
         const n = d.nextId++;
-        d.bones.push(makeBone(`b${n}`, `bone${n}`, { bone: bone.id, end }, 40));
+        const self = boneById(d, bone.id);
+        d.bones.push(makeBone(`b${n}`, `bone${n}`, refOf(self), 40));
         d.selection = { kind: 'bone', id: `b${n}` };
       });
       return btn;
     };
 
+    // A sibling shares this bone's PARENT FRAME, which is not the same as
+    // hanging off this bone. Attaching to a bone's root inherits that bone's
+    // own rotation; attaching where it attaches does not. So two limbs off one
+    // joint are siblings -- bending one must not drag the other -- while a
+    // muzzle flash belongs on the barrel's root, turning with it.
+    //
+    // Copying the ref verbatim also handles the cases a picker makes fiddly:
+    // a sibling of a root bone is another root, and a sibling of a bone on an
+    // art anchor lands on the same anchor.
     actions.append(
-      add('+ at tip', 'tip',
+      add('+ sibling', (b) => (b?.ref ? { ...b.ref } : null),
+        'hangs off whatever this bone hangs off — shares its parent frame, so '
+        + 'rotating this bone does not move the new one'),
+      add('+ at tip', () => ({ bone: bone.id, end: 'tip' }),
         'hangs off this bone’s tip, so it tracks this length instead of '
         + 'snapshotting a position'),
-      add('+ at root', 'root',
-        'hangs off this bone’s root, independent of its length — this is '
-        + 'how you branch'),
+      add('+ at root', () => ({ bone: bone.id, end: 'root' }),
+        'hangs off this bone’s root, independent of its length — and inherits '
+        + 'this bone’s rotation, so rotating this bone turns it too'),
     );
     root.append(actions);
 
@@ -419,8 +437,11 @@ export function createInspector(root, store, { onDownload } = {}) {
     const dl = root.querySelector('.readout');
     if (!dl) return;
     const restMode = editsRest(view.mode);
+    // anim mode reads the baked pose, matching what the canvas draws and what
+    // the engine will play
     const deltas = view.mode === 'anim' ? poseAt(doc, view.frame ?? 0) : null;
-    const { frames } = resolveFrames(doc, frameOpts(view.mode, deltas));
+    const opts = frameOpts(view.mode, deltas);
+    const { frames } = resolveFrames(doc, opts);
     const f = frames.get(boneKey(bone.id, 'root'));
     const tip = frames.get(boneKey(bone.id, 'tip'));
 
@@ -656,8 +677,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     // shortening drops the keys that fall off the end, then re-supplies
     // whichever endpoints the type still requires
     root.append(field('length', anim.length, (v) => edit((a) => {
-      a.length = Math.max(2, Math.round(v));
-      trimKeyframes(a);
+      setLength(a, v);
     }), { min: 2 }));
 
     const info = document.createElement('p');
