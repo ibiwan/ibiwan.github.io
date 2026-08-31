@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tauroid rigger — skeleton</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='4' cy='12' r='2.5' fill='%23ccd4e0'/%3E%3Ccircle cx='12' cy='4' r='2' fill='none' stroke='%23ffb454' stroke-width='1.5'/%3E%3Cpath d='M4 12 L12 4' stroke='%23ccd4e0' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="toolbar">
+    <strong class="brand">rigger</strong>
+    <button id="add-root">+ root</button>
+    <span class="sep"></span>
+    <button id="undo" disabled>undo</button>
+    <button id="redo" disabled>redo</button>
+    <span class="sep"></span>
+    <button id="reset-view">reset view</button>
+    <span class="sep"></span>
+    <div class="modes" role="group" aria-label="edit mode">
+      <button id="mode-rest" class="active">rest</button>
+      <button id="mode-solve" title="bind pose with ik solved — edit rest and watch the solve follow">solve</button>
+      <button id="mode-pose">pose</button>
+      <button id="mode-anim">anim</button>
+    </div>
+    <span class="sep anim-only"></span>
+    <div class="transport anim-only">
+      <button id="play" title="play / pause (space)">▶</button>
+      <label class="fps" title="playback rate">
+        <input type="number" id="fps" min="1" max="60" step="1" value="12"> fps
+      </label>
+    </div>
+    <span class="spacer"></span>
+    <button id="load-json" title="a rig.zip bundle or a bare rig.json">open…</button>
+    <button id="export" class="primary" title="yaml + rig.json + every art svg with its anchors, as a zip">export</button>
+    <button id="clear">clear</button>
+    <input type="file" id="file" accept=".zip,.json,application/zip,application/json" hidden>
+  </header>
+
+  <main>
+    <aside class="panel left">
+      <h2>hierarchy</h2>
+      <div id="hierarchy" class="scroll"></div>
+      <h2 class="with-action art-section">
+        art in scene
+        <button id="add-art" title="add SVG files (or drop them anywhere)">+</button>
+      </h2>
+      <div id="art-list" class="scroll art art-section"></div>
+      <input type="file" id="art-file" accept=".svg,image/svg+xml" multiple hidden>
+      <h2 class="with-action anim-section" hidden>
+        animations
+        <button id="add-anim">+</button>
+      </h2>
+      <div id="anim-list" class="scroll anim-section" hidden></div>
+    </aside>
+
+    <div class="center-col">
+      <div class="viewport-wrap">
+        <svg id="viewport" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div id="swim-lanes" class="swim-lanes" hidden></div>
+    </div>
+
+    <aside class="panel right">
+      <h2>bone</h2>
+      <div id="inspector" class="scroll"></div>
+    </aside>
+  </main>
+
+  <div id="boot-error" hidden>
+    <div class="boot-card">
+      <h1 id="boot-title">didn\u2019t start</h1>
+      <p id="boot-msg"></p>
+      <pre id="boot-detail" hidden><code></code></pre>
+      <p id="boot-hint"></p>
+    </div>
+  </div>
+
+  <!-- classic script: runs even from file://, where the module below cannot -->
+  <script>
+    (function () {
+      var firstError = null;
+      window.addEventListener('error', function (e) {
+        if (!firstError) firstError = (e && (e.message || e.error)) || 'unknown error';
+      }, true);
+
+      function show(title, msg, hint, detail) {
+        var box = document.getElementById('boot-error');
+        if (!box) return;
+        document.getElementById('boot-title').textContent = title;
+        document.getElementById('boot-msg').textContent = msg;
+        document.getElementById('boot-hint').innerHTML = hint;
+        if (detail) {
+          var pre = document.getElementById('boot-detail');
+          pre.hidden = false;
+          pre.firstChild.textContent = detail;
+        }
+        box.hidden = false;
+      }
+
+      if (location.protocol === 'file:') {
+        show('needs to be served',
+          'ES module imports are blocked over file://, so nothing loads and the buttons do nothing.',
+          'Serve the directory: <code>cd tools/rigger &amp;&amp; python3 -m http.server 8017</code>, ' +
+          'then open <a href="http://localhost:8017">http://localhost:8017</a>.');
+        return;
+      }
+
+      // served, but the module still failed to boot -- almost always a stale
+      // cache (http.server sends no Cache-Control) or a genuine script error
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (window.__riggerBooted) return;
+          show('scripts didn\u2019t load',
+            'The page is being served, but src/main.js never finished running.',
+            'Try a hard reload first — <b>Cmd+Shift+R</b> — since python3 -m http.server ' +
+            'sends no cache headers and the browser may be holding an old copy. ' +
+            'If that doesn\u2019t fix it, check the console.',
+            firstError ? String(firstError) : null);
+        }, 800);
+      });
+    })();
+  </script>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
