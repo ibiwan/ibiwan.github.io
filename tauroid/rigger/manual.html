@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown Wrapper</title>
+
+  <!-- ============================================================
+       PRESENTATION
+       ============================================================ -->
+  <style>
+    :root {
+      color-scheme: light dark;
+
+      --bg: #ffffff;
+      --fg: #20242c;
+      --muted: #667080;
+      --panel: #f3f5f8;
+      --rule: #d8dde6;
+      --link: #245fbd;
+      --code: #eef1f5;
+      --toc-bg: #fafbfc;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme]) {
+        --bg: #101722;
+        --fg: #dce6f2;
+        --muted: #94a5ba;
+        --panel: #172131;
+        --rule: #2b3a50;
+        --link: #77aef7;
+        --code: #172131;
+        --toc-bg: #0d141e;
+      }
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+
+      --bg: #ffffff;
+      --fg: #20242c;
+      --muted: #667080;
+      --panel: #f3f5f8;
+      --rule: #d8dde6;
+      --link: #245fbd;
+      --code: #eef1f5;
+      --toc-bg: #fafbfc;
+    }
+
+    :root[data-theme="blue"] {
+      color-scheme: dark;
+
+      --bg: #101722;
+      --fg: #dce6f2;
+      --muted: #94a5ba;
+      --panel: #172131;
+      --rule: #2b3a50;
+      --link: #77aef7;
+      --code: #172131;
+      --toc-bg: #0d141e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--bg);
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 18px/1.6 system-ui, sans-serif;
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1rem 5rem;
+    }
+
+    @media (min-width: 900px) {
+      .page {
+        grid-template-columns: 220px minmax(0, 70ch);
+      }
+    }
+
+    aside {
+      min-width: 0;
+    }
+
+    @media (min-width: 900px) {
+      aside {
+        position: sticky;
+        top: 1rem;
+        align-self: start;
+        max-height: calc(100vh - 2rem);
+        overflow: auto;
+        padding-right: 1rem;
+      }
+    }
+
+    .theme {
+      display: flex;
+      gap: .35rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .theme button {
+      appearance: none;
+      border: 1px solid var(--rule);
+      background: var(--panel);
+      color: var(--fg);
+      border-radius: .35rem;
+      padding: .25rem .5rem;
+      font: inherit;
+      font-size: .78rem;
+      cursor: pointer;
+    }
+
+    .theme button:hover,
+    .theme button:focus-visible {
+      border-color: var(--link);
+      outline: none;
+    }
+
+    #toc {
+      display: flex;
+      flex-direction: column;
+      gap: .15rem;
+      padding: .75rem;
+      border: 1px solid var(--rule);
+      border-radius: .4rem;
+      background: var(--toc-bg);
+    }
+
+    #toc:empty {
+      display: none;
+    }
+
+    #toc a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .86rem;
+      line-height: 1.35;
+      padding: .15rem .3rem;
+      border-left: 2px solid transparent;
+    }
+
+    #toc a:hover,
+    #toc a:focus-visible {
+      color: var(--fg);
+      border-left-color: var(--link);
+      outline: none;
+    }
+
+    #toc .toc-1 {
+      text-transform: uppercase;
+    }
+
+    #toc .toc-2 {
+      padding-left: 1rem;
+      text-transform: capitalize;
+    }
+
+    #toc .toc-3 {
+      padding-left: 1.7rem;
+      text-transform: lowercase;
+    }
+
+    #toc details {
+      display: flex;
+      flex-direction: column;
+    }
+
+    #toc summary {
+      display: flex;
+      align-items: baseline;
+      list-style: none;
+      cursor: pointer;
+    }
+
+    #toc summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #toc summary::before {
+      content: "[+]";
+      flex: 0 0 2.2rem;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: .78rem;
+    }
+
+    #toc details[open]>summary::before {
+      content: "[-]";
+    }
+
+    #toc summary .toc-2 {
+      padding-left: 0;
+    }
+
+    #toc details>.toc-3 {
+      display: block;
+      margin-left: 2.2rem;
+      padding-left: 1rem;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      line-height: 1.2;
+      scroll-margin-top: 1rem;
+    }
+
+    h1 {
+      margin-top: 0;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin-top: 2.5rem;
+      padding-bottom: .25rem;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    a {
+      color: var(--link);
+      text-decoration-thickness: .08em;
+      text-underline-offset: .15em;
+    }
+
+    blockquote {
+      margin-left: 0;
+      padding-left: 1rem;
+      border-left: 3px solid var(--rule);
+      color: var(--muted);
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 1rem;
+      background: var(--code);
+      border: 1px solid var(--rule);
+      border-radius: .35rem;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .9em;
+    }
+
+    :not(pre)>code {
+      padding: .1em .3em;
+      background: var(--code);
+      border-radius: .2rem;
+    }
+
+    img {
+      max-width: 100%;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1rem 0;
+    }
+
+    th,
+    td {
+      padding: .4rem .65rem;
+      border: 1px solid var(--rule);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel);
+    }
+
+    hr {
+      border: 0;
+      border-top: 1px solid var(--rule);
+      margin: 2rem 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="page">
+    <aside>
+      <div class="theme" aria-label="Theme">
+        <button type="button" data-set-theme="">Auto</button>
+        <button type="button" data-set-theme="light">Light</button>
+        <button type="button" data-set-theme="blue">Blue</button>
+      </div>
+      <nav id="toc" aria-label="Contents"></nav>
+    </aside>
+
+    <main id="output"></main>
+  </div>
+
+  <!-- ============================================================
+       MARKDOWN
+       Replace only the contents of this element.
+       ============================================================ -->
+  <script id="markdown" type="text/markdown">
+
+# tauroid rigger
+
+A browser tool for building 2D skeletons, pinning artwork to them, and animating
+the result. It exports a clean zipped-text bundle, loadable by this tool and by the Tauroid engine.
+
+No install, no dependencies, no build step. It is plain HTML, CSS and ES modules.
+
+---
+
+## Running it
+
+ES module imports are blocked over `file://`, so it has to be served:
+
+```bash
+cd tools/rigger && python3 -m http.server 8017
+```
+
+Then open <http://localhost:8017>.
+
+If you open the file directly you get an explanatory error page rather than a
+blank screen. If the page loads but nothing works, hard-reload — `python3 -m
+http.server` sends no cache headers, so the browser may be holding old scripts.
+
+Your work is saved to `localStorage` continuously. Closing the tab does not lose
+it. Use **export** for anything you want to keep.
+
+---
+
+## The core idea
+
+There is **one entity type: the bone.** A bone is:
+
+| field | meaning |
+|---|---|
+| `ref` | what it hangs off |
+| `offset` | x/y in the parent's coordinates |
+| `restAngle` | bind direction, relative to the parent's direction |
+| `poseAngle` | delta from rest |
+| `length` | extent along its own direction — **may be zero** |
+
+A zero-length bone is still a bone. It has a direction and no extent, which is
+how you express a grip, a socket, a mount, or an IK target. There is no second
+entity type for those, so there is nothing to confuse them with.
+
+Direction and length are stored separately rather than as a tip position,
+because at length 0 a tip has no derivable direction.
+
+### What a bone can hang off
+
+Four things, and they are interchangeable everywhere — parents, IK targets, art
+attachment all offer the same list:
+
+- **world origin**
+- **another bone's root** — an explicit frame, independent of that bone's
+  length. This is how you branch.
+- **another bone's tip** — an implicit anchor that *tracks* the parent's length.
+  Lengthen the parent and the child follows.
+- **an art anchor** — a named point on a piece of artwork. The bone inherits the
+  art's rotation, so a hand on a weapon's grip turns with the weapon.
+
+---
+
+## The four modes
+
+Each mode adds exactly one thing to the one before it. Cycle with `` ` ``.
+
+| mode | shows | edits |
+|---|---|---|
+| **rest** | the raw bind pose | bind pose |
+| **solve** | bind pose **+ IK solved** | bind pose |
+| **pose** | + pose deltas | pose deltas |
+| **anim** | + animation deltas | keyframes |
+
+The dim skeleton behind the bright one is always the **raw bind pose**, so in
+any mode you can see how far things have moved from it.
+
+**solve** is the one to build a rig in. You edit rest exactly as in rest mode —
+drag joints, set lengths — but constraints re-solve live as you drag, so you can
+see whether the IK actually works while you are still setting it up.
+
+In **pose** and **anim**, dragging rotates only. A pose is a rotation delta;
+stretching a bone at pose time would bake a length change into an animation.
+
+---
+
+## Building a skeleton
+
+1. **+ root** adds a bone at the world origin.
+2. Select it, then use **+ at tip** or **+ at root** in the inspector to grow the
+   chain.
+   - *at tip* — the child tracks this bone's length.
+   - *at root* — the child is independent of it. Use this to branch.
+3. Drag the **filled circle** (a bone's root) to move it.
+4. Drag the **hollow orange circle** (its tip) to aim and set length at once.
+5. A zero-length bone has no tip to grab, so it gets a **tick** you drag to
+   rotate.
+6. Hold **shift** while aiming to snap to 45° in world space.
+7. Double-click a name in the hierarchy to rename it.
+
+Bones have a fat invisible hit line, so you can click anywhere along the shaft.
+The joint and tip discs sit on top and win near the ends.
+
+### Locks
+
+Each of *offset x*, *offset y*, *rest angle* and *length* has a padlock. A locked
+field cannot be changed by hand — the inspector input is disabled and dragging
+skips it. Locks are **per-axis**: lock x and the root still slides freely in y.
+
+Locks guard manual edits only. **The IK solver and posing are unaffected**,
+because neither writes to these fields — constraints are evaluated rather than
+stored, and posing writes `poseAngle`.
+
+Use them for bind-pose data you are done with and do not want to nudge by
+accident.
+
+---
+
+## Artwork
+
+Drop SVG files anywhere on the window, or use **+** next to *art in scene*.
+
+Each art item owns its own copy of the markup, so dropping the same file twice
+gives two independent items. There is no asset library to reconcile.
+
+The list order **is** the z-order — top of the list is nearest the viewer. Use
+the ▲▼ buttons to restack.
+
+### Anchors
+
+Anchors are **just named points**. They have no roles baked in. The same anchor
+can act as an origin on one binding, a grip on another.
+
+1. Select an art item — anchors only appear while their own item is selected.
+2. **+ anchor** drops one at the art's origin. Drag it into place.
+3. Choose which anchor is **origin** (where the art sits) and which is
+   **direction** (which way it points) on the binding, in the inspector.
+4. **download .svg** writes the anchor group back into the file, leaving the
+   artwork untouched.
+
+Anchors are written into exported SVGs, so a piece of art carries its own
+attachment points to the next person who opens it.
+
+### For whoever is drawing the art
+
+Three things that cause real problems, worth putting in a brief:
+
+- **Presentation attributes, not internal CSS.** Illustrator's `.st0`-style
+  class names are document-scoped. The tool namespaces them, but plain
+  attributes are simpler and more predictable.
+- **Unique object IDs.** Gradients and clip paths are referenced by id; two
+  files sharing an id will collide. The tool prefixes them per item, but unique
+  ids avoid the question.
+- **Responsive OFF.** The tool needs an explicit `viewBox` with width and height
+  to place the art.
+
+---
+
+## Constraints (IK)
+
+Select a bone and pick a **solve** kind in the inspector. Three kinds, and they
+are different promises rather than a link count:
+
+**aim** — one angle. Points this bone at the target.
+
+**reach** — two angles. Puts this bone's *tip* on the target, using this bone
+and its parent. Law of cosines. The **bend** button flips between the two
+solutions, which mirror about the root-to-target line. Adding a joint between
+the two makes it a three-joint problem, which this cannot solve — that is a
+breaking change to the rig, not a setting.
+
+**match** — copies position and angle from the target, component by component.
+Each of x, y and angle can be taken or left, with an offset. Anything left
+unchecked keeps whatever the bone's normal placement gives it.
+
+Match's x/y can be measured two ways:
+
+- **in the target's frame** (default) — an offset means the same thing after the
+  rig turns. Labelled *forward* and *lateral*.
+- **along world axes** — only does what you mean while the rig is axis-aligned.
+
+Targets can be any bone root, bone tip, or art anchor. Anything that would
+resolve back through the chain it drives is filtered out of the list rather than
+allowed and then explained.
+
+Constraints are **evaluated, never stored**. Removing one leaves no residue.
+They solve iteratively to a fixed point, so a constraint pointed at another
+constrained bone sees the solved answer, not a stale one.
+
+---
+
+## Animation
+
+Switch to **anim**. The art list is replaced by the animation list, and a lane
+pane opens at the bottom.
+
+### Model
+
+Every keyframe stores **deltas from rest** — angle plus x/y offset, per bone. One
+keyframe can pose any number of bones. Where two animations touch the same bone
+at the same instant, their deltas simply **add**, in either order.
+
+Animations are independent oscillators. Each runs on its own period. A 5-frame
+and a 7-frame loop line up again every 35 frames without anyone authoring 35
+frames of anything.
+
+### Three types
+
+| type | start pose | end pose | behaviour |
+|---|---|---|---|
+| **forward loop** | required | *not* required | wraps from the last key back to frame 0 |
+| **back & forth** | required | required | reverses at the last frame |
+| **one-shot** | required | required | plays once, then holds |
+
+A forward loop needs no end pose because its start pose *is* its end pose.
+
+### Working with it
+
+1. **+** next to *animations* creates one. Set its type and length.
+2. Tick its checkbox to put it in the lane view.
+3. Click empty track to add a keyframe there; click a dot to select it.
+4. With a keyframe selected, the inspector lists every bone. **+** adds a delta
+   for that bone; **×** removes it.
+5. Orange dots are the mandatory start/end poses and cannot be deleted. Change
+   the type or length instead.
+
+### Rotation direction
+
+Angles are directions, not magnitudes. Interpolating them numerically would make
+270° → 0° count *down* through 135, unwinding a turn instead of finishing it.
+
+So each keyframe carries a **turn** for its outgoing segment:
+
+- **short way round** (default) — correct almost always, and closes a loop
+  properly.
+- **increasing (cw)** / **decreasing (ccw)** — forces a direction.
+
+On a forward loop's last key this is labelled *rotate to start*, because that
+segment is the wrap — the one segment the stored values cannot describe, since
+both its ends are fixed.
+
+A forced direction between two *equal* angles is a **full revolution**. That is
+how you author a continuous spin: one key, direction forced, no second key.
+
+### Playback
+
+**▶** or **space**. The fps box sets the rate.
+
+The playhead is a clock, not a loop — it counts up, and each lane wraps on its
+own period. There is no shared wrap point, so the composite stays continuous
+however the periods relate.
+
+The lane pane shows a **window** onto that clock, sized to the longest lane
+(loops counted twice, so you can watch one come round and check the seam).
+Scrubbing lands anywhere inside it. The playhead line sweeping back to the left
+edge is cosmetic — the pose comes from absolute time, so nothing jumps.
+
+Grabbing the ruler or pressing an arrow key takes playback off autopilot.
+
+If nothing active loops — only one-shots — playback runs to the end and stops
+rather than restarting.
+
+---
+
+## Controls
+
+### Mouse
+
+| | |
+|---|---|
+| drag empty space, or middle-drag | pan |
+| wheel | zoom (toward the cursor) |
+| drag filled circle | move a bone's root |
+| drag hollow circle | aim + set length |
+| drag tick | rotate a zero-length bone |
+| shift while aiming | snap to 45° |
+| drag on the ruler | scrub |
+| double-click a name | rename |
+
+### Keyboard
+
+| | |
+|---|---|
+| `` ` `` | cycle rest → solve → pose → anim |
+| `[` `]` | nudge angle 1° (shift: 10°) |
+| `space` | play/pause *(anim mode)* |
+| `←` `→` | step the playhead 1 frame (shift: 5) *(anim mode)* |
+| `delete` | remove the selection |
+| `cmd/ctrl+Z` | undo — `shift` to redo |
+
+Delete removes a bone **and its descendants**. Art bound to a deleted bone falls
+back to world rather than vanishing.
+
+---
+
+## Export and import
+
+**export** produces `rig.zip`:
+
+| file | what it is |
+|---|---|
+| `skeleton.yaml` | engine-facing. Resolved rest pose, world positions, degrees. |
+| `rig.json` | the authoring graph — refs, anchors, inline markup. |
+| `art/*.svg` | every art item with its anchors written in. |
+
+**open…** reads a `rig.zip` or a bare `rig.json`. Dropping either onto the
+window replaces the current rig, after asking.
+
+Two things worth knowing:
+
+- Import reads **only `rig.json`**, because it carries every art item's markup
+  inline. The `art/*.svg` files are outputs for the engine, not inputs. A
+  hand-edited SVG inside a bundle is ignored on re-import — drop the edited file
+  in as art instead.
+- `skeleton.yaml` is resolved and cannot be loaded back. It is a build product.
+
+The exported bind pose is **unsolved**. Constraints are an authoring aid; baking
+their output into the rest skeleton would make it un-editable downstream.
+
+Old bundles open. Anything from schema v3 onward migrates forward on load;
+anything older is refused with a reason rather than half-loaded.
+
+---
+
+## Tests
+
+```bash
+cd tools/rigger && node test.mjs
+```
+
+The model is DOM-free, so this needs no browser and no dependencies.
+
+  </script>
+
+  <!-- ============================================================
+       INTERPRETATION
+       ============================================================ -->
+  <script>
+    const source = document.querySelector("#markdown").textContent;
+    const output = document.querySelector("#output");
+    const tocElement = document.querySelector("#toc");
+
+    const toc = [];
+    const slugCounts = new Map();
+
+    output.innerHTML = markdown(source);
+    tocElement.innerHTML = renderToc(toc);
+
+    document.querySelectorAll("[data-set-theme]").forEach(button => {
+      button.addEventListener("click", () => {
+        const theme = button.dataset.setTheme;
+
+        if (theme) {
+          document.documentElement.dataset.theme = theme;
+        } else {
+          delete document.documentElement.dataset.theme;
+        }
+      });
+    });
+
+
+    function markdown(source) {
+      const lines = source
+        .replace(/\r\n?/g, "\n")
+        .trim()
+        .split("\n");
+
+      let html = "";
+      let paragraph = [];
+      let list = null;
+      let quote = [];
+      let fence = null;
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+
+        html += `<p>${inline(paragraph.join("\n"))}</p>`;
+        paragraph = [];
+      };
+
+      const flushList = () => {
+        if (!list) return;
+
+        html += `<${list.type}>`;
+        for (const item of list.items) {
+          html += `<li>${inline(item)}</li>`;
+        }
+        html += `</${list.type}>`;
+
+        list = null;
+      };
+
+      const flushQuote = () => {
+        if (!quote.length) return;
+
+        html += `<blockquote>${markdown(quote.join("\n"))}</blockquote>`;
+        quote = [];
+      };
+
+      const flushBlocks = () => {
+        flushParagraph();
+        flushList();
+        flushQuote();
+      };
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // fenced code
+        if (fence) {
+          if (/^```/.test(line)) {
+            const languageClass = fence.language
+              ? ` class="language-${escapeAttribute(fence.language)}"`
+              : "";
+
+            html += `<pre><code${languageClass}>${escapeHtml(fence.lines.join("\n"))}</code></pre>`;
+            fence = null;
+          } else {
+            fence.lines.push(line);
+          }
+          continue;
+        }
+
+        const fenceStart = line.match(/^```(.*)$/);
+        if (fenceStart) {
+          flushBlocks();
+          fence = {
+            language: fenceStart[1].trim(),
+            lines: []
+          };
+          continue;
+        }
+
+        // table: header line + separator line
+        if (
+          line.includes("|") &&
+          i + 1 < lines.length &&
+          isTableSeparator(lines[i + 1])
+        ) {
+          flushBlocks();
+
+          const headers = splitTableRow(line);
+          const alignments = parseTableAlignments(lines[i + 1]);
+
+          i += 2;
+
+          const rows = [];
+          while (
+            i < lines.length &&
+            lines[i].trim() &&
+            lines[i].includes("|")
+          ) {
+            rows.push(splitTableRow(lines[i]));
+            i++;
+          }
+
+          i--;
+
+          html += "<table><thead><tr>";
+
+          headers.forEach((cell, column) => {
+            const align = alignments[column];
+            const style = align ? ` style="text-align:${align}"` : "";
+            html += `<th${style}>${inline(cell)}</th>`;
+          });
+
+          html += "</tr></thead><tbody>";
+
+          rows.forEach(row => {
+            html += "<tr>";
+
+            headers.forEach((_, column) => {
+              const align = alignments[column];
+              const style = align ? ` style="text-align:${align}"` : "";
+              html += `<td${style}>${inline(row[column] ?? "")}</td>`;
+            });
+
+            html += "</tr>";
+          });
+
+          html += "</tbody></table>";
+          continue;
+        }
+
+        // blank line
+        if (!line.trim()) {
+          flushBlocks();
+          continue;
+        }
+
+        // heading
+        const heading = line.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          flushBlocks();
+
+          const level = heading[1].length;
+          const title = heading[2].trim();
+          const id = uniqueSlug(title);
+
+          if (level <= 3) {
+            toc.push({ level, title, id });
+          }
+
+          html += `<h${level} id="${id}">${inline(title)}</h${level}>`;
+          continue;
+        }
+
+        // horizontal rule
+        if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
+          flushBlocks();
+          html += "<hr>";
+          continue;
+        }
+
+        // blockquote
+        const quoted = line.match(/^>\s?(.*)$/);
+        if (quoted) {
+          flushParagraph();
+          flushList();
+          quote.push(quoted[1]);
+          continue;
+        }
+
+        // unordered list
+        const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+        if (unordered) {
+          flushParagraph();
+          flushQuote();
+
+          if (!list || list.type !== "ul") {
+            flushList();
+            list = { type: "ul", items: [] };
+          }
+
+          list.items.push(unordered[1]);
+          continue;
+        }
+
+        // ordered list
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (ordered) {
+          flushParagraph();
+          flushQuote();
+
+          if (!list || list.type !== "ol") {
+            flushList();
+            list = { type: "ol", items: [] };
+          }
+
+          list.items.push(ordered[1]);
+          continue;
+        }
+
+        // ordinary prose
+        flushList();
+        flushQuote();
+        paragraph.push(line.trim());
+      }
+
+      if (fence) {
+        html += `<pre><code>${escapeHtml(fence.lines.join("\n"))}</code></pre>`;
+      }
+
+      flushBlocks();
+      return html;
+    }
+
+
+    function inline(text) {
+      const code = [];
+
+      text = escapeHtml(text);
+
+      // protect inline code first
+      text = text.replace(/`([^`]+)`/g, (_, value) => {
+        const marker = `\u0000CODE${code.length}\u0000`;
+        code.push(`<code>${value}</code>`);
+        return marker;
+      });
+
+      // images
+      text = text.replace(
+        /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"&quot;([^"]*)&quot;")?\)/g,
+        (_, alt, src, title) =>
+          `<img src="${src}" alt="${alt}"${title ? ` title="${title}"` : ""}>`
+      );
+
+      // links
+      text = text.replace(
+        /\[([^\]]+)\]\(([^)\s]+)(?:\s+"&quot;([^"]*)&quot;")?\)/g,
+        (_, label, href, title) =>
+          `<a href="${href}"${title ? ` title="${title}"` : ""}>${label}</a>`
+      );
+
+      // strong / emphasis
+      text = text
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/__(.+?)__/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>")
+        .replace(/_(.+?)_/g, "<em>$1</em>");
+
+      // restore inline code
+      text = text.replace(
+        /\u0000CODE(\d+)\u0000/g,
+        (_, index) => code[Number(index)]
+      );
+
+      return text.replace(/\n/g, " ");
+    }
+
+
+    function splitTableRow(line) {
+      return line
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map(cell => cell.trim());
+    }
+
+
+    function isTableSeparator(line) {
+      const cells = splitTableRow(line);
+
+      return (
+        cells.length > 0 &&
+        cells.every(cell => /^:?-{3,}:?$/.test(cell))
+      );
+    }
+
+
+    function parseTableAlignments(line) {
+      return splitTableRow(line).map(cell => {
+        const left = cell.startsWith(":");
+        const right = cell.endsWith(":");
+
+        if (left && right) return "center";
+        if (right) return "right";
+        if (left) return "left";
+        return "";
+      });
+    }
+
+
+    function uniqueSlug(text) {
+      const base =
+        text
+          .toLowerCase()
+          .replace(/`([^`]+)`/g, "$1")
+          .replace(/[*_~]/g, "")
+          .replace(/&[a-z]+;/gi, "")
+          .replace(/[^\p{L}\p{N}\s-]/gu, "")
+          .trim()
+          .replace(/\s+/g, "-") || "section";
+
+      const count = slugCounts.get(base) ?? 0;
+      slugCounts.set(base, count + 1);
+
+      return count ? `${base}-${count + 1}` : base;
+    }
+
+
+    function renderToc(items) {
+      const roots = [];
+      const stack = [];
+
+      items.forEach(item => {
+        const node = { ...item, children: [] };
+
+        while (stack.length && stack.at(-1).level >= node.level) {
+          stack.pop();
+        }
+
+        const parent = stack.at(-1);
+        (parent ? parent.children : roots).push(node);
+        stack.push(node);
+      });
+
+      const rootLevel = Math.min(...items.map(item => item.level));
+
+      function renderNodes(nodes, groupName) {
+        return nodes.map((node, index) => {
+          const link =
+            `<a class="toc-${node.level}" href="#${node.id}">${escapeHtml(node.title)}</a>`;
+          const children = renderNodes(node.children, `${groupName}-${index}`);
+
+          if (!node.children.length) return link;
+
+          // Keep the document title visible; fold lower-level branches.
+          if (node.level === rootLevel) return link + children;
+
+          return (
+            `<details name="${groupName}">` +
+            `<summary>${link}</summary>` +
+            children +
+            `</details>`
+          );
+        }).join("");
+      }
+
+      return items.length ? renderNodes(roots, "toc-section") : "";
+    }
+
+
+    function escapeHtml(text) {
+      return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+
+    function escapeAttribute(text) {
+      return text.replace(/[^\w-]/g, "");
+    }
+  </script>
+
+</body>
+
+</html>
