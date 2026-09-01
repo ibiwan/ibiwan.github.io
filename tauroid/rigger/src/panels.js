@@ -777,10 +777,24 @@ export function createInspector(root, store, { onDownload } = {}) {
       root.append(turnRow);
     }
 
-    // per-bone delta editors: bones with deltas first, then the rest
-    const withDelta = doc.bones.filter((b) => kf.deltas[b.id]);
-    const without = doc.bones.filter((b) => !kf.deltas[b.id]);
-    for (const bone of [...withDelta, ...without]) {
+    // per-bone delta editors, in three tiers:
+    //
+    //   0  has a delta in THIS keyframe
+    //   1  touched by some other keyframe in this animation -- empty here, but
+    //      near the top and ready to fill
+    //   2  everything else
+    //
+    // Tier 1 is the point. Sorting per keyframe alone made a bone you posed at
+    // frame 0 sink back into the full list at frame 9, so the rows moved under
+    // you as you walked along a lane. Tiering by the whole animation holds them
+    // still: the bones an animation cares about stay together in every one of
+    // its keyframes.
+    //
+    // sort is stable, so bones keep hierarchy order within a tier.
+    const touched = new Set();
+    for (const k of anim.keyframes) for (const id of Object.keys(k.deltas)) touched.add(id);
+    const tier = (b) => (kf.deltas[b.id] ? 0 : touched.has(b.id) ? 1 : 2);
+    for (const bone of [...doc.bones].sort((x, y) => tier(x) - tier(y))) {
       const d = kf.deltas[bone.id];
 
       const boneHead = document.createElement('div');
@@ -806,7 +820,10 @@ export function createInspector(root, store, { onDownload } = {}) {
           { step: '0.5', key: `${bone.id}:offsetY` }));
       } else {
         const add = Object.assign(document.createElement('button'),
-          { textContent: '+', title: 'add delta for this bone' });
+          { textContent: '+',
+            title: touched.has(bone.id)
+              ? 'add delta — this bone is animated in another keyframe here'
+              : 'add delta for this bone' });
         add.onclick = () => editKf((k) => { k.deltas[bone.id] = makeDelta(); });
         boneHead.append(add);
         root.append(boneHead);

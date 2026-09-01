@@ -44,6 +44,11 @@ export function exportYaml(doc, artPaths = null) {
     '# the same motion with constraints already solved, split per bone per',
     '# channel as [frame, value, d|t] -- d designed, t generated to keep a',
     '# linear tween faithful. Play `baked` and no solver is needed.',
+    '#',
+    '# `fps` is the rate the animations were authored at. frame numbers in',
+    '# `keyframes` and `baked` are counts, not seconds -- this is what turns',
+    '# them into time.',
+    `fps: ${doc.fps ?? 12}`,
     'bones:',
   ];
   if (!doc.bones.length) out[out.length - 1] = 'bones: []';

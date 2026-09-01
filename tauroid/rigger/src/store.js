@@ -9,7 +9,7 @@ const LS_KEY = 'tauroid.rigger.doc';
 const HISTORY_LIMIT = 200;
 
 // bump when the document shape changes.
-export const SCHEMA = 15;
+export const SCHEMA = 16;
 
 // The oldest schema this build can bring forward.
 //
@@ -26,7 +26,7 @@ export const MIN_SCHEMA = 3;
 
 export function createStore(initial) {
   let doc = initial;
-  let view = { pan: { x: 0, y: 0 }, zoom: 1, mode: 'rest', anchorDrag: null, frame: 0, playing: false, fps: 12 };
+  let view = { pan: { x: 0, y: 0 }, zoom: 1, mode: 'rest', anchorDrag: null, frame: 0, playing: false };
 
   const undoStack = [];
   const redoStack = [];
@@ -309,10 +309,19 @@ export function normalizeDoc(doc) {
     anim.keyframes.sort((a, b) => a.frame - b.frame);
   }
 
+  // v16: playback rate belongs to the DOCUMENT, not the view. The engine has
+  // to know how fast to play what it was handed, so a rate that only lived in
+  // this session's view state could not be exported -- and reopening a rig
+  // always gave you 12 regardless of what it was authored at.
+  // non-positive means absent, matching advanceFrame's own `fps > 0 ? fps : 12`
+  doc.fps = Number.isFinite(doc.fps) && doc.fps > 0
+    ? Math.max(1, Math.min(60, Math.round(doc.fps)))
+    : 12;
+
   doc.selection = normalizeSelection(doc.selection);
   doc.nextId ??= doc.bones.length + doc.art.length + (doc.animations?.length ?? 0) + 1;
   doc.version = SCHEMA;
   return doc;
 }
 
-export const emptyDoc = () => ({ bones: [], art: [], animations: [], selection: null, nextId: 1 });
+export const emptyDoc = () => ({ bones: [], art: [], animations: [], selection: null, nextId: 1, fps: 12 });

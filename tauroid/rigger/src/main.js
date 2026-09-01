@@ -128,11 +128,18 @@ for (const mode of ['rest', 'solve', 'pose', 'anim']) {
 // own period as it goes. The lane view shows a WINDOW onto that clock, so what
 // plays stays continuous no matter how the periods relate.
 on('play', () => store.setView((v) => { v.playing = !v.playing; }));
-document.getElementById('fps').onchange = (e) => {
-  const n = Math.max(1, Math.min(60, Math.round(Number(e.target.value) || 12)));
-  e.target.value = n;
-  store.setView((v) => { v.fps = n; });
+const fpsBox = document.getElementById('fps');
+fpsBox.onchange = () => {
+  const n = Math.max(1, Math.min(60, Math.round(Number(fpsBox.value) || 12)));
+  fpsBox.value = n;
+  store.update((d) => { d.fps = n; });
 };
+// the box follows the document, so opening a rig shows the rate it was
+// authored at rather than whatever was last typed here
+store.subscribe(() => {
+  const n = String(store.doc.fps ?? 12);
+  if (fpsBox.value !== n && fpsBox !== document.activeElement) fpsBox.value = n;
+});
 
 let lastTick = performance.now();
 function tick(now) {
@@ -147,7 +154,7 @@ function tick(now) {
   // time runs free -- each lane wraps on its own period, so there is no shared
   // wrap point. only a set with no loops in it has somewhere to stop.
   const stopAt = endsAt(store.doc);
-  const next = advanceFrame(v.frame ?? 0, dt, v.fps ?? 12, { stopAt });
+  const next = advanceFrame(v.frame ?? 0, dt, store.doc.fps ?? 12, { stopAt });
   if (next === v.frame) return;
   store.setView((s2) => {
     s2.frame = next;
