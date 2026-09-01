@@ -41,43 +41,76 @@ function localDelta(bone, frames, refFrame) {
   if (!self) return null;
   const parent = refFrame(bone.ref);
 
+  // Measured from rest + pose, because that is what the delta will be ADDED to:
+  // the composition is rest + pose + animation, and the engine gets `pose_angle`
+  // on the bone. Subtracting only restAngle made a posed bone's pose count
+  // twice -- once inside the solve this delta reproduces, once when the delta
+  // was applied on top.
   const restAngle = Number.isFinite(bone.restAngle) ? bone.restAngle : 0;
+  const poseAngle = Number.isFinite(bone.poseAngle) ? bone.poseAngle : 0;
   const base = bone.offset ?? v2(0, 0);
   const local = rotate(sub(self.pos, parent.pos), -parent.angle);
 
   return {
-    angle: wrapDeg(self.angle - (parent.angle + restAngle)),
+    angle: wrapDeg(self.angle - (parent.angle + restAngle + poseAngle)),
     offsetX: local.x - base.x,
     offsetY: local.y - base.y,
   };
 }
 
-// One animation, solved in isolation.
+// The standing solve: what the constraints do with no animation running.
 //
-// Isolation is deliberate: animations have to stay independently playable, so
-// each is baked alone and the engine adds them. Solve-then-add is not quite
-// add-then-solve where the solve is nonlinear, but keeping them separable is
-// worth more than that second-order difference.
+// It is a CONSTANT per bone, so it belongs to the rig rather than to any
+// animation. Baking it into each animation is what made two active lanes apply
+// the constraint twice -- the engine adds them, and a constant added N times is
+// N times wrong.
+export function solveOffset(doc) {
+  const still = { ...doc, animations: [] };
+  const { frames, refFrame } = resolveFrames(still, { posed: true, constraints: true });
+  const out = {};
+  for (const b of still.bones) {
+    const d = localDelta(b, frames, refFrame);
+    if (!d) continue;
+    if (Math.abs(d.angle) > 1e-6 || Math.abs(d.offsetX) > 1e-6 || Math.abs(d.offsetY) > 1e-6) {
+      out[b.id] = d;
+    }
+  }
+  return out;
+}
+
+// One animation's CONTRIBUTION -- what it changes, not where things end up.
+//
+// Isolation keeps animations independently playable, and is exact when one is
+// running. It is NOT exact when several run at once: a constraint moves a bone
+// in every animation's solve, so each bake carries the whole constraint result
+// and the engine, adding them, applies it once per animation. See TODO --
+// this is a design limit of per-animation baking, not a bug in the arithmetic.
 function sampler(doc, anim) {
   const solo = { ...doc, animations: [{ ...anim, active: true }] };
+  const base = solveOffset(doc);
   const cache = new Map();
   return (f) => {
     const key = f.toFixed(4);
     if (cache.has(key)) return cache.get(key);
-    // posed:false is deliberate. A baked delta is measured from the REST pose,
-    // because that is what the export's bind pose contains -- and poseAngle is
-    // a scratch value the engine never sees. Sampling with posed:true baked it
-    // into every animation as a constant offset, so a bone nudged in pose mode
-    // silently contaminated animations that never keyed it.
-    //
-    // `deltas` still apply: they are independent of `posed`.
+
+    // posed:true, and localDelta subtracts the pose back out again. The pair
+    // matters: this samples the REAL solved pose, and the delta is expressed
+    // relative to rest + pose so that adding it there reconstructs exactly
+    // this. A bone the animation never touches bakes to zero and keeps its
+    // pose, rather than either losing it or having it counted twice.
     const { frames, refFrame } = resolveFrames(solo, {
-      posed: false, constraints: true, deltas: poseAt(solo, f),
+      posed: true, constraints: true, deltas: poseAt(solo, f),
     });
     const out = new Map();
     for (const b of solo.bones) {
       const d = localDelta(b, frames, refFrame);
-      if (d) out.set(b.id, d);
+      if (!d) continue;
+      // subtract the standing solve: a bone this animation does not move now
+      // bakes to zero and drops out entirely, instead of carrying a constant
+      const z = base[b.id];
+      out.set(b.id, z
+        ? { angle: d.angle - z.angle, offsetX: d.offsetX - z.offsetX, offsetY: d.offsetY - z.offsetY }
+        : d);
     }
     cache.set(key, out);
     return out;
@@ -108,9 +141,9 @@ function subdivide(read, lo, hi, tol, out, depth = 0) {
   subdivide(read, mid, hi, tol, out, depth + 1);
 }
 
-// The scale positional tolerance is measured against. A zero-length bone is an
-// attachment point with no extent of its own, so it borrows the rig's median
-// bone length rather than being held to an impossible standard.
+// The scale positional tolerance is measured against. A bone whose length is
+// zero has no extent to measure against, so it borrows the rig's median bone
+// length rather than being held to an impossible standard.
 function sceneScale(doc) {
   const lens = doc.bones.map((b) => b.length).filter((n) => n > 1).sort((a, b) => a - b);
   return lens.length ? lens[Math.floor(lens.length / 2)] : 1;

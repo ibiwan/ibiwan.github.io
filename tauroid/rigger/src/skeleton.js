@@ -3,7 +3,7 @@
 // a bone is:
 //   ref         what it hangs off
 //   offset      x/y in the ref's coordinates
-//   restAngle   bind direction, relative to the ref's direction
+//   restAngle   rest direction, relative to the ref's direction
 //   poseAngle   delta from rest
 //   length      extent along its own direction; may be 0
 //
@@ -43,10 +43,11 @@ export const makeBone = (id, name, ref = null, length = 40) => ({
   poseAngle: 0,
   length,
   constraint: null,   // see solveConstraints
-  // Manual-edit guards. They gate the INSPECTOR and DRAGGING only: constraints
-  // are evaluated rather than stored, and posing writes poseAngle, so neither
-  // is blocked by a lock. Locking is for bind-pose data you are done with and
-  // do not want to nudge by accident.
+  // Axis-snapping for the drag, not write protection. A hand cannot move in a
+  // perfect orthogonal line or a perfect arc, so holding x turns a sloppy drag
+  // into an exact vertical one. They gate the INSPECTOR and DRAGGING only:
+  // constraints are evaluated rather than stored, and posing writes poseAngle,
+  // so neither is blocked by a lock.
   locked: { offsetX: false, offsetY: false, restAngle: false, length: false },
 });
 
@@ -120,7 +121,10 @@ export function dependsOnArt(doc, ref, artId) {
   }
   return false;
 }
-export const isPoint = (b) => b.length <= 0.001;
+// A property, not a category. Every bone has a length; some are zero, and a
+// bone whose length is zero is not a different kind of thing -- it is a
+// frame with a direction and nothing drawn along it.
+export const hasExtent = (b) => b.length > 0.001;
 
 // How many solve passes can possibly be needed.
 //
@@ -195,7 +199,7 @@ function resolveOnce(doc, posed, overrides, deltas) {
       // touching one bone compose without fighting.
       //
       // Independent of `posed`: a delta is measured from REST, because that is
-      // what the export's bind pose contains and what the engine will compose
+      // what the export's rest configuration contains and what the engine composes
       // against. Gating it on poseAngle would make a baked pose land wherever
       // the last manual drag happened to leave the bone.
       const d = deltas?.[b.id] ?? null;
@@ -289,23 +293,29 @@ export function subtree(doc, id) {
 
 // The edit modes, as a ladder -- each rung adds exactly one thing:
 //
-//   rest    the bind pose, raw
-//   solve   + constraints, so ik is visible while the bind pose is being built
+//   rest    the rest configuration, raw
+//   solve   + constraints, so ik is visible while the configuration is built
 //   pose    + pose deltas
 //   anim    + animation deltas
 //
-// `rest` and `solve` both EDIT the bind pose; the difference is only whether
-// the solve runs. That is why constraints are an independent flag on
+// `rest` and `solve` both EDIT the rest configuration; the difference is only
+// whether the solve runs. That is why constraints are an independent flag on
 // resolveFrames rather than something posing switches on.
 export const editsRest = (mode) => mode === 'rest' || mode === 'solve';
 export const solvesIk = (mode) => mode !== 'rest';
-// `anim` is the odd one: its deltas are BAKED, meaning the solve is already
-// folded into them, so it neither applies poseAngle nor re-runs constraints.
-// That is precisely the engine's view -- rest plus tweened channels, no solver
-// -- which is what makes the preview honest about what will ship.
-export const frameOpts = (mode, deltas = null) => (mode === 'anim'
-  ? { posed: false, constraints: false, deltas }
-  : { posed: !editsRest(mode), constraints: solvesIk(mode), deltas: null });
+// rest -> pose -> [standing solve] -> animation, all added.
+//
+// `anim` runs no solver PER FRAME -- the standing solve is recomputed whenever
+// the rig changes, but never per frame: it arrives as a per-bone constant and
+// each animation contributes only what it CHANGES, so both are just deltas by
+// the time they get here. That is what the engine does too, which is what makes
+// the preview honest -- including the small error where two animations move the
+// same constrained chain and their separately-solved contributions are summed.
+export const frameOpts = (mode, deltas = null) => ({
+  posed: !editsRest(mode),
+  constraints: mode === 'anim' ? false : solvesIk(mode),
+  deltas: mode === 'anim' ? deltas : null,
+});
 
 // --- drag decomposition -----------------------------------------------------
 
@@ -403,10 +413,10 @@ export function constraintProblem(doc, bone) {
     if (Math.abs(bone.offset.x) > 1e-6 || Math.abs(bone.offset.y) > 1e-6) {
       return 'reach needs a zero offset, so the joint sits at the parent’s tip';
     }
-    // one zero-length link is fine -- it degenerates to an aim. two is not:
-    // there is no extent anywhere, so nothing can be moved onto the target.
+    // one link of length zero is fine -- it degenerates to an aim. two is
+    // not: nothing has extent, so nothing can be moved onto the target.
     if (bone.length <= 1e-6 && parent.length <= 1e-6) {
-      return 'reach needs length on this bone or its parent';
+      return 'reach needs a non-zero length on this bone or its parent';
     }
     chain.push(parent.id);
   }
@@ -505,16 +515,16 @@ export function solveConstraints(doc, baseFrames) {
     // instead of two -- so it degenerates to an aim rather than being refused.
     // The law of cosines below divides by L1 and by L1*L2, which is the only
     // reason these need handling separately.
-    if (L1 <= 1e-6 && L2 <= 1e-6) continue;      // no extent anywhere: nothing to solve
+    if (L1 <= 1e-6 && L2 <= 1e-6) continue;      // both lengths zero: nothing to solve
     if (L2 <= 1e-6) {
-      // this bone has no extent, so its tip IS the parent's tip: putting that
+      // this bone's length is zero, so its tip IS the parent's tip: putting that
       // on the target is the whole solve, and this bone's own angle is left to
       // its rest and pose rather than being invented
       put(parent.id, { angle: angleOf(toTarget) });
       continue;
     }
     if (L1 <= 1e-6) {
-      // the parent has no extent, so this bone's root is already pinned and it
+      // the parent's length is zero, so this bone's root is already pinned and it
       // simply aims itself -- the parent's angle drives nothing here
       put(bone.id, { angle: angleOf(toTarget) });
       continue;

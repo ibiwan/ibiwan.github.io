@@ -5,7 +5,7 @@
   --text: #d8dce4;
   --dim: #848c9c;
   --accent: #6fa8ff;
-  --rest: #4b5361;   /* bind pose: recedes */
+  --rest: #4b5361;   /* rest configuration: recedes */
   --pose: #ccd4e0;   /* live pose: reads first */
   --tip: #ffb454;
 }

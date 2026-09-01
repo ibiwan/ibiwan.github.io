@@ -61,8 +61,8 @@ export function attachTools(svg, store, canvas) {
 
     store.update((d) => { d.selection = { kind: 'bone', id: hit.id }; });
 
-    // where a bone SITS is bind-pose data, so it is draggable only in the
-    // modes that edit the bind pose; posing rotates and never relocates
+    // where a bone SITS is rest configuration, so it is draggable only in the
+    // modes that edit that configuration; posing rotates and never relocates
     const movable = hit.handle === 'tip' || hit.handle === 'rotate'
       || (hit.handle === 'root' && editsRest(store.view.mode));
 

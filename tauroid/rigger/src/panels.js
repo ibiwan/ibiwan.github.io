@@ -2,7 +2,7 @@
 // knows the other exists.
 
 import {
-  boneById, childrenOf, makeBone, resolveFrames, boneKey, wouldCycle, isPoint,
+  boneById, childrenOf, makeBone, resolveFrames, boneKey, wouldCycle, hasExtent,
   makeConstraint, constraintProblem, dependsOn, dependsOnArt, editsRest, frameOpts,
   isLocked,
 } from './skeleton.js';
@@ -29,8 +29,8 @@ export function createHierarchy(root, store, { onRename } = {}) {
       row.style.paddingLeft = `${8 + depth * 14}px`;
       row.textContent = bone.name;
 
-      // descriptive, not a type: a zero-length bone is still just a bone
-      if (isPoint(bone)) row.append(Object.assign(document.createElement('span'),
+      // descriptive, not a type: length is a property every bone has
+      if (!hasExtent(bone)) row.append(Object.assign(document.createElement('span'),
         { className: 'badge', textContent: '0 len' }));
       if (bone.ref?.art) row.append(Object.assign(document.createElement('span'),
         { className: 'badge', textContent: `▸ ${bone.ref.anchor}` }));
@@ -45,7 +45,7 @@ export function createHierarchy(root, store, { onRename } = {}) {
 
     const seen = new Set();
     const rooted = (b) => b.ref?.bone != null
-      || (b.ref?.art != null && (doc.art ?? []).some((a) => a.id === b.ref.art && a.bone != null));
+      || (b.ref?.art != null && (doc.art ?? []).some((a) => a.id === b.ref.art && a.ref?.bone != null));
     for (const b of doc.bones.filter((b) => !rooted(b))) emit(b, 0, seen);
     for (const b of doc.bones) emit(b, 0, seen);   // orphans stay visible
 
@@ -75,17 +75,18 @@ export function createInspector(root, store, { onDownload } = {}) {
     // commit on change, not input, so partially-typed numbers don't thrash
     input.onchange = () => onCommit(input.type === 'number' ? Number(input.value) : input.value);
 
-    // an optional padlock, for bind-pose data you are done with. it disables
-    // the input and the drag; it does NOT stop the solver or posing, which
-    // never write here anyway.
+    // An optional padlock. This is axis-snapping for the drag, not write
+    // protection: a hand cannot move in a perfect orthogonal line or a perfect
+    // arc, so holding x turns a sloppy drag into an exact vertical one. It does
+    // NOT stop the solver or posing, which never write here anyway.
     if (opts.lock) {
       const pad = document.createElement('input');
       pad.type = 'checkbox';
       pad.className = 'lock';
       pad.checked = !!opts.lock.locked;
       pad.title = opts.lock.locked
-        ? 'locked — unlock to edit by hand (ik and posing are unaffected)'
-        : 'lock against manual edits';
+        ? 'held — drags leave this alone, so you can move the others cleanly'
+        : 'hold this value while dragging the others';
       pad.onchange = () => opts.lock.onToggle(pad.checked);
       if (opts.lock.locked) input.disabled = true;
       wrap.append(pad);
@@ -229,7 +230,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     const bone = boneById(doc, doc.selection?.id);
     if (!bone) {
       root.append(Object.assign(document.createElement('p'), {
-        className: 'empty', textContent: 'Select a bone or an art item.',
+        className: 'empty', textContent: 'Select a bone or a graphic.',
       }));
       return;
     }
@@ -240,7 +241,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     root.append(field('name', bone.name, (v) => edit((b) => { b.name = v; }), { type: 'text' }));
     root.append(refPicker(doc, bone, (ref) => edit((b) => { b.ref = ref; })));
 
-    // bind-pose data: editable in rest mode only
+    // rest configuration: editable in the modes that edit it
     const lock = (fieldName) => ({
       locked: isLocked(bone, fieldName),
       onToggle: (on) => edit((b) => { b.locked[fieldName] = on; }),
@@ -452,7 +453,7 @@ export function createInspector(root, store, { onDownload } = {}) {
         ?? 'pos', `${fmt(f.pos.x)}, ${fmt(f.pos.y)}`],
       ['direction', `${fmt(wrapDeg(f.angle))}°`],
     ];
-    if (tip && !isPoint(bone)) rows.push(['tip', `${fmt(tip.pos.x)}, ${fmt(tip.pos.y)}`]);
+    if (tip && hasExtent(bone)) rows.push(['tip', `${fmt(tip.pos.x)}, ${fmt(tip.pos.y)}`]);
     for (const [k, v] of rows) {
       dl.append(
         Object.assign(document.createElement('dt'), { textContent: k }),
@@ -461,7 +462,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     }
   }
 
-  // art items place themselves on a bone; they have no rest/pose of their own,
+  // a graphic places itself on an anchor; it has no rest/pose of its own,
   // so this panel is the same in either mode
   function renderArt(doc) {
     const item = artById(doc, doc.selection.id);
@@ -598,7 +599,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     }
     if (!(item.anchors ?? []).length) {
       list.append(Object.assign(document.createElement('p'),
-        { className: 'empty', textContent: 'None. Add one, then drag it onto the art.' }));
+        { className: 'empty', textContent: 'None. Add one, then drag it onto the graphic.' }));
     }
     root.append(list);
 
@@ -606,7 +607,7 @@ export function createInspector(root, store, { onDownload } = {}) {
     anchorActions.className = 'row';
     const addAnchor = Object.assign(document.createElement('button'),
       { textContent: '+ anchor' });
-    addAnchor.title = 'drops one at the art\u2019s origin \u2014 drag it into place';
+    addAnchor.title = 'drops one at the graphic\u2019s origin \u2014 drag it into place';
     addAnchor.onclick = () => store.update((d) => {
       const it = artById(d, item.id);
       if (!it) return;

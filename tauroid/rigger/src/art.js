@@ -25,10 +25,10 @@ export const makeArt = (id, name, filename, svg, anchors = []) => ({
   filename,
   svg,                     // inline copy, for preview and re-export
   anchors,                 // [{ name, x, y }] in the art's own coordinates
-  bone: null,              // bound bone id, or null to pin to world
-  origin: null,            // anchor NAME that sits on the bone root
-  direction: null,         // anchor NAME that the bone direction points at
-  offset: { x: 0, y: 0 },  // manual nudge, in the bone's frame
+  ref: null,               // what it hangs off; see refKey in skeleton.js
+  origin: null,            // anchor NAME that sits on the host anchor
+  direction: null,         // anchor NAME the host anchor's direction points at
+  offset: { x: 0, y: 0 },  // manual nudge, in the host anchor's frame
   angle: 0,                // manual nudge, on top of any anchor alignment
   scale: 1,                // uniform display scale; see artTransform
   // the file's own viewBox mapping, captured at import. stored rather than

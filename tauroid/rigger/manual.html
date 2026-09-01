@@ -336,8 +336,7 @@
 
 # tauroid rigger
 
-A browser tool for building 2D skeletons, pinning paper-doll artwork to them, and animating
-the result. It exports a clean zipped-text bundle, loadable by this tool and by the Tauroid engine.
+A browser tool for building 2D skeletons, pinning paper-doll artwork to them, and animating the result. It exports a clean zipped-text bundle, loadable by this tool and by the Tauroid engine.
 
 ---
 
@@ -357,7 +356,7 @@ https://github.com/ibiwan/tauroid/tree/master/tools/rigger
 
 ### Anchors
 
-An **`anchor`** is a point in space that things can be attached to. 
+An **`anchor`** is a point in space, with a direction, that things can be attached to. 
 
 * There are currently four types of anchors: `world`, `root`, `tip`, `art`.
 
@@ -367,7 +366,7 @@ An **`anchor`** is a point in space that things can be attached to.
 
 A **`bone`** is the core entity of all rigging skeletons and animation.
 
-* A bone consists of an anchor reference, an angle (degrees), and a length.
+* A bone consists primarily of an anchor reference (with position and angle) and a length.
 
 * A bone inherits the angle from its anchor, then rest and pose angles are added to that.
     * If a bone is part of a solved system, the solution's angle will override the above sum.
@@ -383,7 +382,7 @@ A **`bone`** is the core entity of all rigging skeletons and animation.
 
 ### Art
 
-This tool currently natively speaks only SVG.  An art file can be added by dragging onto the window or by clicking *`+`* next to "Art in Scene".
+This tool currently natively speaks only SVG.  A graphic can be added by dragging its file onto the window or by clicking *`+`* next to "Art in Scene".
 
 * Any file added twice will be handled as independent instances and can be placed and attached independently.
 
@@ -403,26 +402,26 @@ Cycle with *`\``*.
 
 | mode | shows | edits affect |
 |---|---|---|
-| **rest** | the default skeletal arrangement created with bone bindings | bone bindings |
-| **solve** | bind pose **+ constraints (aim, reach, match)** | bone bindings |
-| **pose** | custom pose within constraints | pose deltas |
-| **anim** | animation: generated poses within constraints | keyframe poses |
+| **rest** | the rest configuration — the generic arrangement of parts | bone attachments |
+| **solve** | the solve configuration: rest **+ constraints (aim, reach, match)** | bone attachments |
+| **pose** | the pose configuration: a specific arrangement, within constraints | pose deltas |
+| **anim** | the anim configuration, as playback: rest + pose + standing solve + baked animation | keyframe poses |
 
 ### Rest
 
-The dim skeleton behind the bright one is always the **rest position**, so in
-any mode you can see how far things have moved from it.
+The dim skeleton behind the bright one is always the **rest configuration**, so in any mode you can see how far things have moved from it.
 
 ### Solve
 
-**solve** is the one to build a rig in. You edit rest exactly as in rest mode —
-drag joints, set lengths — but constraints re-solve live as you drag, so you can
-see whether the solver actually works while you are still setting it up.
+**solve** is the one to build a rig in. You edit rest exactly as in rest mode — drag joints, set lengths — but constraints re-solve live as you drag, so you can see whether the solver actually works while you are still setting it up.
 
 ### Pose, Anim
 
-In **pose** and **anim**, dragging rotates only. A pose is a rotation delta;
-stretching a bone at pose time would bake a length change into an animation.
+In **pose** and **anim**, dragging rotates only. A pose is a rotation delta; stretching a bone at pose time would bake a length change into an animation.
+
+*Currently, dragging in **anim** writes the pose delta rather than the selected keyframe, so it moves the base pose instead of the animation.*
+
+**anim** composes its frames the same way the engine will, rather than the way the other three modes do. It is the preview to trust: what you see there is what ships.
 
 ---
 
@@ -432,7 +431,7 @@ stretching a bone at pose time would bake a length change into an animation.
 2. Select it, then use *`+ sibling`*, *`+ at tip`*, or *`+ at root`* in the inspector to grow the tree
    - *at tip* — the child is offset by this bone's extent and inherits its angle.
    - *at root* — the child inherits this bone's position and angle.
-   - *sibling* — the child inherits the parent's position and angle.
+   - *sibling* — the child inherits this bone's parent's position and angle.
 3. Drag the **filled circle** (a bone's root) to move it (and change the bone's offset x/y values)
 4. Drag the **hollow orange circle** (its tip) to set angle and length at once.
   - A zero-length bone has no tip to grab, so it gets a **shaded circle** you drag to rotate.
@@ -440,39 +439,33 @@ stretching a bone at pose time would bake a length change into an animation.
 5. Double-click a name in the hierarchy to rename it in the inspector.
 6. A bone's reference anchor can be changed using the drop-down in the inspector.
 
-Bones have a wide hit line, so you can click anywhere along the line to select them.
-When multiple anchors overlap, selecting a bone lets you drag that bone's endpoints.
+Bones have a wide hit line, so you can click anywhere along the line to select them. When multiple anchors overlap, selecting a bone lets you drag that bone's endpoints.
 
 ---
 
 ### Locks
 
-In the Inspector, each of *offset x*, *offset y*, *rest angle* and *length* has a padlock. A locked field cannot be changed by hand — the inspector input is disabled and dragging skips it. Locks are **per-axis**: lock x and the root still slides freely in y.
-
-Locks guard manual edits only. **The IK solver and posing are unaffected**, because neither writes to these fields — constraints are evaluated rather than stored, and posing writes `poseAngle`.
-
-Use them for bind-pose data you are done with and do not want to nudge by accident, or to constrain edits to only one or another field.
+In the Inspector, each of *offset x*, *offset y*, *rest angle* and *length* has a padlock. A locked field cannot be changed by dragging or editing, but can be modified by pose and solve deltas.
 
 ---
 
-## Attaching Art to the Skeleton
+## Binding Art to the Skeleton
 
 1. Add art to scene (drag file to UI or select with *`+`*)
+    - The graphic will be created with the World as default attachment target
+    - All art anchors in a graphic have direction defined relative to the attachment target
 2. Add anchors to the graphic - an "origin" anchor and "direction" anchor is usually a good start.
     1. Select graphic in "Art in Scene" pane
     2. Select *`+ anchor`* in the Inspector
     3. Name the anchor in the Inspector
     4. Drag the anchor on the graphic to its location
-      1. All anchors in an unattached graphic will have direction defined relative to world.
-3. Attach the graphic to an anchor in the scene
+3. Bind the graphic to an anchor in the scene
     1. Select target anchor (usually a bone root) from "attached to" drop-down in Inspector.
-      1. All anchors in an attached graphic will have direction defined relative to the target anchor.
     2. Select an art anchor in the "origin" drop-down to position the graphic relative to the target anchor
     3. Select an art anchor in the "direction" drop-down to orient the graphic relative to the target anchor
     4. Optionally adjust the "scale" slider to resize the graphic; its origin and direction will stay consistent.
 
-Anchors are **just named point/direction tuples**. They have no roles baked in. The same anchor
-can act as an origin on one binding, a grip on another, a direction on another. The direction can be explicit (bone anchors), implicit (world or art anchors), or solved from constraints.
+Anchors are **just named point/direction tuples**. They have no roles baked in. The same anchor can act as an origin on one binding, a grip on another, a direction on another. The direction can be explicit (bone anchors), implicit (world or art anchors), or solved from constraints.
 
 You can click `*download .svg`* to retrieve a copy of the graphic with the anchors baked in for future use.
 
@@ -482,11 +475,10 @@ You can click `*download .svg`* to retrieve a copy of the graphic with the ancho
 
 A couple things that cause real problems, worth putting in a brief:
 
-- **Presentation attributes, not internal CSS.** Illustrator's `.st0`-style
-  class names are document-scoped. The tool namespaces them, but plain
-  attributes are simpler and more predictable.
-- **Responsive OFF.** The tool needs an explicit `viewBox` with width and height
-  to place the art.
+- **Presentation attributes, not internal CSS.** 
+  Illustrator's `.st0`-style class names are document-scoped. 
+  The tool namespaces them, but plain attributes are simpler and more predictable.
+- **Responsive OFF.** The tool needs an explicit `viewBox` and `width`/`height` on the root `<svg>` to place the art; Illustrator's Responsive checkbox omits the latter two.
 
 ---
 
@@ -494,7 +486,7 @@ A couple things that cause real problems, worth putting in a brief:
 
 Select a bone and pick a *`solve`* kind from the drop-down in the inspector.
 
-Options are `pose`, `aim`, `reach`, `match`
+Options are `pose` (default), `aim`, `reach`, `match`
 
 No numeric inverse-kinematics solves are currently supported.
 
@@ -513,7 +505,8 @@ Closed-form Inverse Kinematics is used to attempt to put this bone's tip on the 
 
 * Solve is accomplished using Law of cosines
 * The *`bend`* button controls which solution is selected, e.g. which way an elbow should bend.
-* Falls back to `aim` mode if either bone's length is zero.
+* Falls back to `aim` behavior if either bone has zero length, aiming the nonzero bone
+    * refused only when both bones have a length of zero
 
 ### match
 
@@ -527,7 +520,8 @@ Copies values from the target anchor.
 ### Notes
 
 * Targets can be any bone root, bone tip, or art anchor. 
-* Any descendant of the constrained bone cannot be a target. 
+* Any descendant of the constrained bone cannot be a target.
+  * `reach` also drives the bone's *parent*, so the parent and its descendants are excluded too. 
   * Any invalid constraints encountered will not be computed and will raise a warning.
   * Constraints themselves do not count as ancestry linkages for the purposes of this rule.
 * Constraints are evaluated, and emitted as part of yaml output, but are not stored in the skeleton definition.
@@ -542,20 +536,18 @@ pane opens at the bottom.
 
 ### Model
 
-Every keyframe stores **deltas from rest** — angle plus x/y offset, per bone. One
-keyframe can pose any number of bones. Where two animations touch the same bone
-at the same instant, their deltas simply **add**, in either order.
+Every **authored** keyframe stores a **delta set** per bone – dx, dy, da – measured from rest. One keyframe can pose any number of bones. Where two animations touch a given bone at the same time, their deltas simply add together.
 
-Animations are independent oscillators. Each runs on its own period. A 5-frame
-and a 7-frame loop line up again every 35 frames without anyone authoring 35
-frames of anything.
+Export writes a second representation with a different baseline: **baked** channels are measured from `rest` + `pose` with the standing solve taken out. The two are not interchangeable — `keyframes` in the yaml is what you authored, `baked` is what the engine plays.
+
+Animations are independent oscillators. Each runs on its own period. A 5-frame and a 7-frame loop line up again every 35 frames without anyone authoring 35 frames of anything.
 
 ### Types
 
 | type | start pose | end pose | behaviour |
 |---|---|---|---|
 | **forward loop** | required | *not* required | wraps from the last key back to frame 0 |
-| **back & forth** | required | required | reverses at the last frame |
+| **back-and-forth** | required | required | reverses at the last frame |
 | **one-shot** | required | required | plays once, then holds |
 
 A forward loop needs no end pose because its start pose *is* its end pose.
@@ -564,14 +556,13 @@ A forward loop needs no end pose because its start pose *is* its end pose.
 
 1. Click *`+`* next to *animations* creates a new animation. Set its type and length in the Inspector.
 2. Tick its checkbox to put it in the lane view and include it in preview.
-3. With an animation selected, click anywhere on its track to add a keyframe at that point; click a dot to select it.
+3. With an animation selected, click anywhere within its length on the track to add a keyframe at that point; click a dot to select it. 
 4. With a keyframe selected, the inspector lists every bone. *`+`* adds a delta for that bone; *`×`* removes it.
 5. Orange dots are the mandatory start/end poses and cannot be deleted. Change the type or length instead.
 
 ### Rotation direction
 
-Angles are directions, not magnitudes. Interpolating them numerically would make
-270° → 0° count *down* through 135, unwinding a turn instead of finishing it.
+Angles are directions, not magnitudes. Interpolating them numerically would make 270° → 0° count *down* through 135, unwinding a turn instead of finishing it.
 
 So each keyframe carries a **turn** for its outgoing segment:
 
@@ -579,30 +570,22 @@ So each keyframe carries a **turn** for its outgoing segment:
   properly.
 - **increasing (cw)** / **decreasing (ccw)** — forces a direction.
 
-On a forward loop's last key this is labelled *rotate to start*, because that
-segment is the wrap — the one segment the stored values cannot describe, since
-both its ends are fixed.
+On a forward loop's last key this is labelled *rotate to start*, because that segment is the wrap — the one segment the stored values cannot describe, since both its ends are fixed.
 
-A forced direction between two *equal* angles is a **full revolution**. That is
-how you author a continuous spin: one key, direction forced, no second key.
+A forced direction between two *equal* angles is a **full revolution**. That is how you author a continuous spin: one key, direction forced, no second key.
 
 ### Playback
 
 **▶** or **space**. The fps box sets the rate.
 
-The playhead is a clock, not a loop — it counts up, and each lane wraps on its
-own period. There is no shared wrap point, so the composite stays continuous
-however the periods relate.
+The playhead is a clock, not a loop — it counts up, and each lane wraps on its own period. There is no shared wrap point, so the composite stays continuous however the periods relate.
 
-The lane pane shows a **window** onto that clock, sized to the longest lane
-(loops counted twice, so you can watch one come round and check the seam).
-Scrubbing lands anywhere inside it. The playhead line sweeping back to the left
-edge is cosmetic — the pose comes from absolute time, so nothing jumps.
+The lane pane shows a **window** onto that clock, sized to the longest lane — for a looping animation the window spans *two* of its periods, so you can watch it come round and check the seam.
+Scrubbing lands anywhere inside it. The playhead line sweeping back to the left edge is cosmetic — the pose comes from absolute time, so nothing jumps.
 
 Grabbing the ruler or pressing an arrow key takes playback off autopilot.
 
-If nothing active loops — only one-shots — playback runs to the end and stops
-rather than restarting.
+If nothing active loops — only one-shots — playback runs to the end and stops rather than restarting.
 
 ---
 
@@ -643,25 +626,30 @@ back to world rather than vanishing.
 
 | file | what it is |
 |---|---|
-| `skeleton.yaml` | engine-facing. Resolved rest pose, world positions, degrees. Constraints, and animated Baked positions. |
+| `skeleton.yaml` | engine-facing. Rest configuration flattened to world space, degrees. Per bone: pose delta, solution delta, constraint definition. Per animation: authored keyframes *and* baked channels' deltas.  (All deltas relative not world)|
 | `rig.json` | the authoring graph — refs, anchors, inline markup. |
-| `art/*.svg` | every art item with its anchors written in. |
+| `art/*.svg` | every graphic with its anchors written in. |
 
 **open…** reads a `rig.zip` or a bare `rig.json`. Dropping either onto the
 window replaces the current rig, after asking.
 
 Two things worth knowing:
 
-- Import reads **only `rig.json`**, because it carries every art item's markup
+- Import reads **only `rig.json`**, because it carries every graphic's markup
   inline. The `art/*.svg` files are outputs for the engine, not inputs. A
   hand-edited SVG inside a bundle is ignored on re-import — drop the edited file
   in as art instead.
 - `skeleton.yaml` is resolved and cannot be loaded back. It is a build product.
 
-The exported bind pose is **unsolved**. Constraints are an authoring aid; baking
-their output into the rest skeleton would make it un-editable downstream.
+The exported rest configuration is **unsolved**. Constraints are an authoring aid; baking their output into the rest skeleton would make it un-editable downstream.
 
-Old bundles open. Anything from schema v3 onward migrates forward on load;
+### What the downstream engine does with it
+
+The engine does not need to re-solve constraints, it just adds deltas to the base angles.
+
+## Export/Import Bundles
+
+Old bundles should open fine. Anything from schema v3 onward migrates forward on load;
 anything older is refused with a reason rather than half-loaded.
 
   </script>

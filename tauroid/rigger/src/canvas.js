@@ -2,87 +2,71 @@
 // from pointer events on real elements, it stays crisp at any zoom, and it is
 // the substrate the artist's svg chunks will drop into later.
 //
-// two skeletons are drawn every frame: the rest pose as a dark ghost and the
-// posed result bright on top. with no deltas they coincide exactly, so the
+// two skeletons are drawn every frame: the rest configuration as a dark ghost
+// and the posed result bright on top. with no deltas they coincide exactly, so
 // ghost costs nothing until you actually pose something.
 //
 // filled disc  = a bone's ROOT: an explicit frame, selectable and draggable.
 // hollow disc  = a bone's TIP: an implicit anchor, derived from the length.
 
 import {
-  resolveFrames, frameOpts, boneKey, artAnchorKey, refKey, isPoint, constraintProblem,
+  resolveFrames, frameOpts, boneKey, artAnchorKey, refKey, hasExtent, constraintProblem,
 } from './skeleton.js';
-import { bakeAnimation, sampleBaked } from './bake.js';
+import { bakeAnimation, sampleBaked, solveOffset } from './bake.js';
 import { loopPeriod } from './animation.js';
 
-// Baking is cached, and invalidated only as far as it has to be.
-//
-// Measured on the 19-bone marine, three animations: ~38ms for a full bake,
-// which is ~400 whole-scene solves at ~0.09ms each. A single solve is cheap --
-// the cost is how many frames the subdivision probes, not the solving itself.
-//
-// Scrubbing and playback go through setView, which does not bump the document
-// version, so they never re-bake: a rendered frame costs ~0.02ms. Only an EDIT
-// pays, which is why the invalidation is per-animation. Wiping every bake
-// because one keyframe moved made nudging a value in the smallest animation
-// cost the same ~38ms as rebuilding all three.
-//
-// Every bake depends on the whole skeleton, so a bone change still clears
-// everything. An animation change clears only that animation.
-const bakeCache = { version: -1, skeleton: null, byAnim: new Map() };
+// Baking is cached against the document version, and invalidated per animation
+// so nudging one keyframe does not rebuild the others. Scrubbing and playback
+// go through setView, which does not bump the version, so they never re-bake.
+const bakeCache = { version: -1, skeleton: null, base: null, byAnim: new Map() };
 
-// Signatures are only computed when the version says something changed, so
-// playback never pays for them.
 const skeletonSig = (doc) => JSON.stringify([
   (doc.bones ?? []).map((b) => [b.id, b.ref, b.offset, b.restAngle, b.poseAngle, b.length, b.constraint]),
   (doc.art ?? []).map((a) => [a.id, a.ref, a.offset, a.angle, a.scale, a.origin, a.direction, a.anchors, a.viewport]),
 ]);
-
-// `active` is deliberately absent: toggling a lane in or out of the view does
-// not change what that animation bakes to.
+// `active` is absent on purpose: toggling a lane does not change what it bakes to
 const animSig = (a) => JSON.stringify([a.type, a.length, a.keyframes]);
 
-// What the ENGINE will show: baked channels, linearly tweened, composed
-// additively. The preview plays this rather than re-solving live, so the
-// tolerance chosen at bake time is visible while authoring instead of being a
-// surprise after export.
-function bakedPose(store, doc, frame) {
-  const active = (doc.animations ?? []).filter((a) => a.active);
-  if (!active.length) return null;
-
+// Exactly what the engine will compose: the standing solve as a constant, plus
+// each active animation's tweened contribution. Nothing solves per frame --
+// though solveOffset below does solve, whenever the rig itself changes.
+function enginePose(store, doc, frame) {
   if (bakeCache.version !== store.version) {
     bakeCache.version = store.version;
     const skel = skeletonSig(doc);
-
     if (skel !== bakeCache.skeleton) {
       bakeCache.skeleton = skel;
+      bakeCache.base = solveOffset(doc);
       bakeCache.byAnim.clear();
     } else {
-      const live = new Set((doc.animations ?? []).map((a) => a.id));
       for (const [id, entry] of [...bakeCache.byAnim]) {
         const anim = (doc.animations ?? []).find((a) => a.id === id);
-        if (!live.has(id) || entry.sig !== animSig(anim)) bakeCache.byAnim.delete(id);
+        if (!anim || entry.sig !== animSig(anim)) bakeCache.byAnim.delete(id);
       }
     }
   }
 
   const out = {};
-  for (const a of active) {
+  const add = (id, d) => {
+    if (!out[id]) out[id] = { angle: 0, offsetX: 0, offsetY: 0 };
+    out[id].angle += d.angle;
+    out[id].offsetX += d.offsetX;
+    out[id].offsetY += d.offsetY;
+  };
+  for (const [id, d] of Object.entries(bakeCache.base ?? {})) add(id, d);
+
+  for (const a of (doc.animations ?? []).filter((x) => x.active)) {
     let entry = bakeCache.byAnim.get(a.id);
     if (!entry) {
       entry = { sig: animSig(a), baked: bakeAnimation(doc, a) };
       bakeCache.byAnim.set(a.id, entry);
     }
-    const pose = sampleBaked(entry.baked, loopPeriod(a) ?? a.length, frame);
-    for (const [id, d] of Object.entries(pose)) {
-      if (!out[id]) out[id] = { angle: 0, offsetX: 0, offsetY: 0 };
-      out[id].angle += d.angle;
-      out[id].offsetX += d.offsetX;
-      out[id].offsetY += d.offsetY;
-    }
+    for (const [id, d] of Object.entries(sampleBaked(entry.baked, loopPeriod(a) ?? a.length, frame))) add(id, d);
   }
   return out;
 }
+
+
 
 import {
   parseArt, artTransform, viewportTransform, clipRect, namespaceIds, scopeStyles,
@@ -164,7 +148,7 @@ export function createCanvas(svg, store) {
       const sel = doc.selection?.kind === 'bone' && doc.selection.id === b.id;
       const attrs = { class: `bone ${kind}${sel ? ' selected' : ''}` };
 
-      const zero = isPoint(b);
+      const zero = !hasExtent(b);
       const end = zero ? along(root, 14 * s) : tip.pos;
       const line = { x1: root.pos.x, y1: root.pos.y, x2: end.x, y2: end.y };
 
@@ -367,9 +351,9 @@ export function createCanvas(svg, store) {
     const s = worldPerPixel();
     // in anim mode the playhead drives the pose: every active lane sampled at
     // the same frame, added together, layered on top of the pose deltas
-    const deltas = view.mode === 'anim' ? bakedPose(store, doc, view.frame ?? 0) : null;
-    // the dim layer is always the RAW bind pose, so every mode shows how far
-    // the live skeleton has been moved from it -- including by ik alone
+    const deltas = view.mode === 'anim' ? enginePose(store, doc, view.frame ?? 0) : null;
+    // the dim layer is always the RAW rest configuration, so every mode shows
+    // how far the live skeleton has moved from it -- including by ik alone
     const rest = resolveFrames(doc, { posed: false, constraints: false }).frames;
     const posed = resolveFrames(doc, frameOpts(view.mode, deltas)).frames;
     const editingRest = view.mode === 'rest';
@@ -408,7 +392,7 @@ export function createCanvas(svg, store) {
         'data-id': b.id, 'data-handle': 'root',
       }));
 
-      if (!isPoint(b)) {
+      if (hasExtent(b)) {
         // implicit anchor, derived from the length
         layers.handles.append(el('circle', {
           cx: tip.pos.x, cy: tip.pos.y, r: 4.5 * s,
