@@ -10,7 +10,6 @@ import { boneById, subtree, worldToOffset, aimAt, editsRest, isLocked,
 } from './skeleton.js';
 import { needsEndFrame } from './animation.js';
 import { artById, anchorNamed } from './art.js';
-import { wrapDeg } from './math.js';
 
 const SNAP_DEGREES = 45;
 
@@ -229,16 +228,5 @@ export function attachTools(svg, store, canvas) {
       return;
     }
 
-    if (e.key === '[' || e.key === ']') {
-      const step = (e.key === '[' ? -1 : 1) * (e.shiftKey ? 10 : 1);
-      const rest = editsRest(store.view.mode);
-      store.update((d) => {
-        if (d.selection?.kind !== 'bone') return;
-        const b = boneById(d, d.selection.id);
-        if (!b) return;
-        if (!rest) { b.poseAngle = wrapDeg(b.poseAngle + step); return; }
-        if (!isLocked(b, 'restAngle')) b.restAngle = wrapDeg(b.restAngle + step);
-      });
-    }
   });
 }

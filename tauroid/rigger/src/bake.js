@@ -41,11 +41,8 @@ function localDelta(bone, frames, refFrame) {
   if (!self) return null;
   const parent = refFrame(bone.ref);
 
-  // Measured from rest + pose, because that is what the delta will be ADDED to:
-  // the composition is rest + pose + animation, and the engine gets `pose_angle`
-  // on the bone. Subtracting only restAngle made a posed bone's pose count
-  // twice -- once inside the solve this delta reproduces, once when the delta
-  // was applied on top.
+  // Measured from rest + pose, because that is what the delta is ADDED to.
+  // Subtracting only restAngle counts a posed bone's pose twice (bug #1).
   const restAngle = Number.isFinite(bone.restAngle) ? bone.restAngle : 0;
   const poseAngle = Number.isFinite(bone.poseAngle) ? bone.poseAngle : 0;
   const base = bone.offset ?? v2(0, 0);
@@ -60,10 +57,9 @@ function localDelta(bone, frames, refFrame) {
 
 // The standing solve: what the constraints do with no animation running.
 //
-// It is a CONSTANT per bone, so it belongs to the rig rather than to any
-// animation. Baking it into each animation is what made two active lanes apply
-// the constraint twice -- the engine adds them, and a constant added N times is
-// N times wrong.
+// A CONSTANT per bone, so it belongs to the rig rather than to any animation:
+// the engine adds, and a constant added once per active lane is N times wrong
+// (bug #2).
 export function solveOffset(doc) {
   const still = { ...doc, animations: [] };
   const { frames, refFrame } = resolveFrames(still, { posed: true, constraints: true });
@@ -93,13 +89,19 @@ function sampler(doc, anim) {
     const key = f.toFixed(4);
     if (cache.has(key)) return cache.get(key);
 
+    // Ask for post N as ITSELF, not wrapped to post 0.
+    //
+    // Playback wraps a forward loop's frame N to 0, because arriving there is
+    // frame 0 of the next cycle. The bake needs it as the TWEEN TARGET of the
+    // closing segment, and that target is the ghost -- wrapping makes the last
+    // segment run backwards to frame 0's value instead. Invisible when the
+    // ghost is a whole turn, since 360 and 0 are the same pose; wrong by the
+    // remainder when it is not. See bug #19.
     // posed:true, and localDelta subtracts the pose back out again. The pair
-    // matters: this samples the REAL solved pose, and the delta is expressed
-    // relative to rest + pose so that adding it there reconstructs exactly
-    // this. A bone the animation never touches bakes to zero and keeps its
-    // pose, rather than either losing it or having it counted twice.
+    // matters: a bone the animation never touches must bake to zero and keep
+    // its pose, rather than losing it or counting it twice (bug #1, bug #2).
     const { frames, refFrame } = resolveFrames(solo, {
-      posed: true, constraints: true, deltas: poseAt(solo, f),
+      posed: true, constraints: true, deltas: poseAt(solo, f, { seam: true }),
     });
     const out = new Map();
     for (const b of solo.bones) {
@@ -164,14 +166,10 @@ export function bakeAnimation(doc, anim, tolerance = DEFAULT_TOLERANCE) {
     const ref = bone.length > 1 ? bone.length : scale;
     const tol = { angle: tolerance.angle, offsetX: ref * tolerance.offset, offsetY: ref * tolerance.offset };
 
-    // Angles must be UNWRAPPED before they can be tweened.
-    //
-    // localDelta wraps to (-180, 180], so a bone turning past half a circle
-    // flips sign mid-rotation -- a channel reading 180 then -174 tweens
-    // backwards through zero and throws the limb across the sprite. Walk the
-    // whole period once accumulating shortest-arc steps, and every later
-    // sample is snapped to the branch nearest that continuous baseline. A
-    // full turn then reads 0 -> 360 rather than 0 -> 180 -> -180 -> 0.
+    // Angles must be UNWRAPPED before they can be tweened: localDelta wraps to
+    // (-180, 180], and a channel reading 180 then -174 tweens backwards through
+    // zero (bug #4). Walk the period once for a continuous baseline, then snap
+    // every later sample to the branch nearest it.
     const spine = new Map();
     {
       let acc = 0;
@@ -248,20 +246,26 @@ export function sampleBaked(baked, period, frame) {
 // Every active animation, baked and composed -- the engine's view of the scene.
 export function bakedPoseAt(doc, frame, cache) {
   const active = (doc.animations ?? []).filter((a) => a.active);
-  if (!active.length) return null;
 
-  const poses = active.map((a) => {
-    const baked = cache?.get(a.id) ?? bakeAnimation(doc, a);
-    return sampleBaked(baked, loopPeriod(a) ?? a.length, frame);
-  });
-
+  // The STANDING SOLVE is part of the pose, and is added exactly once.
+  //
+  // It belongs to no animation -- that is the whole of bug #2 -- so returning
+  // only the summed baked deltas yields a pose that is missing it, and missing
+  // it looks exactly like bug #2's symptom: a limb thrown hundreds of units.
+  // Composing it here means a caller cannot omit it by accident.
   const out = {};
-  for (const pose of poses) {
-    for (const [id, d] of Object.entries(pose)) {
-      if (!out[id]) out[id] = { angle: 0, offsetX: 0, offsetY: 0 };
-      out[id].angle += d.angle;
-      out[id].offsetX += d.offsetX;
-      out[id].offsetY += d.offsetY;
+  const add = (id, d) => {
+    if (!out[id]) out[id] = { angle: 0, offsetX: 0, offsetY: 0 };
+    out[id].angle += d.angle;
+    out[id].offsetX += d.offsetX;
+    out[id].offsetY += d.offsetY;
+  };
+  for (const [id, d] of Object.entries(solveOffset(doc))) add(id, d);
+
+  for (const a of active) {
+    const baked = cache?.get(a.id) ?? bakeAnimation(doc, a);
+    for (const [id, d] of Object.entries(sampleBaked(baked, loopPeriod(a) ?? a.length, frame))) {
+      add(id, d);
     }
   }
   return out;

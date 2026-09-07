@@ -12,14 +12,12 @@ export const scale = (a, k) => v2(a.x * k, a.y * k);
 export const len = (a) => Math.hypot(a.x, a.y);
 export const dist = (a, b) => len(sub(a, b));
 
-// rotate a vector by an angle in degrees
 export function rotate(v, deg) {
   const r = deg * DEG;
   const c = Math.cos(r), s = Math.sin(r);
   return v2(v.x * c - v.y * s, v.x * s + v.y * c);
 }
 
-// signed angle of a vector, in degrees
 export const angleOf = (v) => Math.atan2(v.y, v.x) / DEG;
 
 // wrap to (-180, 180] so inspector values stay readable after dragging

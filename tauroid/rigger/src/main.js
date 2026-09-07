@@ -95,7 +95,6 @@ document.getElementById('art-file').onchange = async (e) => {
   e.target.value = '';
 };
 
-// drag and drop anywhere on the window
 for (const type of ['dragenter', 'dragover']) {
   window.addEventListener(type, (e) => {
     if (![...(e.dataTransfer?.types ?? [])].includes('Files')) return;

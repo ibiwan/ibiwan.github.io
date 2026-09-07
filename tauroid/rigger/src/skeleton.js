@@ -106,7 +106,6 @@ export function* refChain(doc, ref) {
   }
 }
 
-// Does resolving `ref` pass through any of these bones?
 export function dependsOn(doc, ref, boneIds) {
   for (const node of refChain(doc, ref)) {
     if (node.kind === 'bone' && boneIds.includes(node.id)) return true;
@@ -114,7 +113,6 @@ export function dependsOn(doc, ref, boneIds) {
   return false;
 }
 
-// Does resolving `ref` pass through this art item?
 export function dependsOnArt(doc, ref, artId) {
   for (const node of refChain(doc, ref)) {
     if (node.kind === 'art' && node.id === artId) return true;
@@ -271,7 +269,6 @@ function resolveOnce(doc, posed, overrides, deltas) {
   return { frames, refFrame, boneFrame, artFrame };
 }
 
-// would pointing `id` at `ref` create a cycle?
 // would pointing bone `id` at `ref` create a cycle? the walk crosses into art,
 // since a bone can hang off an art anchor and that art hangs off something too
 export const wouldCycle = (doc, id, ref) => dependsOn(doc, ref, [id]);
@@ -321,10 +318,8 @@ export const frameOpts = (mode, deltas = null) => ({
 
 // where must this bone's offset be, for its root to sit at `worldPos`?
 //
-// Resolved in the MODE's terms, like aimAt: the parent frame a rest-mode drag
-// measures against is the raw one, while a solve-mode drag measures against
-// the solved one. Passing a bare `posed` flag would silently use whichever
-// the default happened to be.
+// Resolved in the MODE's terms, like aimAt: a rest-mode drag measures against
+// the raw parent frame, a solve-mode drag against the solved one (bug #7).
 export function worldToOffset(doc, bone, worldPos, mode) {
   const { refFrame } = resolveFrames(doc, frameOpts(mode));
   const p = refFrame(bone.ref);
@@ -348,9 +343,8 @@ export function aimAt(doc, bone, worldPos, mode, { snap = 0 } = {}) {
   const local = wrapDeg(want - parent.angle);
 
   // `local` is already relative to the parent as the mode resolved it, so the
-  // component being edited is exactly `local`. Subtracting the OTHER component
-  // would be double-counting: a rest-mode drag resolves without poseAngle, so
-  // taking it off again aimed the bone somewhere the cursor never was.
+  // component being edited is exactly `local`. Subtracting the other one
+  // double-counts (bug #6).
   return editsRest(mode)
     ? { restAngle: local, length: dist(self.pos, worldPos) }
     : { poseAngle: wrapDeg(local - bone.restAngle) };

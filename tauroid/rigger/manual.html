@@ -405,7 +405,7 @@ Cycle with *`\``*.
 | **rest** | the rest configuration — the generic arrangement of parts | bone attachments |
 | **solve** | the solve configuration: rest **+ constraints (aim, reach, match)** | bone attachments |
 | **pose** | the pose configuration: a specific arrangement, within constraints | pose deltas |
-| **anim** | the anim configuration, as playback: rest + pose + standing solve + baked animation | keyframe poses |
+| **anim** | the anim configuration, as playback: rest + pose + standing solve + baked animation | keyframe poses (todo) |
 
 ### Rest
 
@@ -467,7 +467,7 @@ In the Inspector, each of *offset x*, *offset y*, *rest angle* and *length* has 
 
 Anchors are **just named point/direction tuples**. They have no roles baked in. The same anchor can act as an origin on one binding, a grip on another, a direction on another. The direction can be explicit (bone anchors), implicit (world or art anchors), or solved from constraints.
 
-You can click `*download .svg`* to retrieve a copy of the graphic with the anchors baked in for future use.
+You can click *`download .svg`* to retrieve a copy of the graphic with the anchors baked in for future use.
 
 ---
 
@@ -544,13 +544,17 @@ Animations are independent oscillators. Each runs on its own period. A 5-frame a
 
 ### Types
 
-| type | start pose | end pose | behaviour |
-|---|---|---|---|
-| **forward loop** | required | *not* required | wraps from the last key back to frame 0 |
-| **back-and-forth** | required | required | reverses at the last frame |
-| **one-shot** | required | required | plays once, then holds |
+A duration of **N** means N *intervals*, so an animation has N+1 posts, at frames 0..N. Nothing has to be authored — posts 0 and N hold rest until you key them, and they show as grey dots until you do.
 
-A forward loop needs no end pose because its start pose *is* its end pose.
+| type | post N is | played? | period |
+|---|---|---|---|
+| **forward loop** | the same post as 0 — the **ghost** | no | N |
+| **back-and-forth** | the apex | yes, once per cycle | **2N** |
+| **one-shot** | the end, then held | yes | — |
+
+The number that matters when lining lanes up is the **period**, not the length, and for a back-and-forth it is twice the duration. A 15-frame jounce repeats every 30 frames, so it fits exactly twice inside a 60-frame stride. The inspector prints it next to the length so you never have to work it out.
+
+A forward loop needs no end pose because its start pose *is* its end pose by default.
 
 ### Working with animations
 
@@ -558,25 +562,27 @@ A forward loop needs no end pose because its start pose *is* its end pose.
 2. Tick its checkbox to put it in the lane view and include it in preview.
 3. With an animation selected, click anywhere within its length on the track to add a keyframe at that point; click a dot to select it. 
 4. With a keyframe selected, the inspector lists every bone. *`+`* adds a delta for that bone; *`×`* removes it.
-5. Orange dots are the mandatory start/end poses and cannot be deleted. Change the type or length instead.
+5. Grey dots are posts nobody has keyed — they hold rest. Click one to key it; delete that key and it returns to grey. The dashed dot just past the end of a forward loop is the ghost.
 
 ### Rotation direction
 
-Angles are directions, not magnitudes. Interpolating them numerically would make 270° → 0° count *down* through 135, unwinding a turn instead of finishing it.
+An angle travels the **literal** difference between its two keys. `0` to `900` is two and a half turns; `-160` to `160` goes the long way round, because that is what those numbers say. Nothing takes a shortest arc on your behalf.
 
-So each keyframe carries a **turn** for its outgoing segment:
+Direction is therefore something you write in the value, which means each bone gets its own — one keyframe can turn the head clockwise and the wrist the other way.
 
-- **short way round** (default) — correct almost always, and closes a loop
-  properly.
-- **increasing (cw)** / **decreasing (ccw)** — forces a direction.
+### The ghost
 
-On a forward loop's last key this is labelled *rotate to start*, because that segment is the wrap — the one segment the stored values cannot describe, since both its ends are fixed.
+A forward loop has no end key: frame 0 is both the start and where the loop closes. So the closing segment runs from the last key to frame 0's value — `270` back to `0` unwinds, like any other segment.
 
-A forced direction between two *equal* angles is a **full revolution**. That is how you author a continuous spin: one key, direction forced, no second key.
+To carry on round instead, use the **ghost**: the hollow dot just past the end of a forward loop's track. Click it, tick a bone, and set where that bone should arrive. `360` instead of `0` means one more turn; `720` means two.
+
+The ghost is never played. The playhead stops at the last real frame — the ghost is only where the closing tween is headed.
+
+Beside each value it shows how far you are from frame 0. A whole number of turns closes cleanly. Anything else pops by the remainder every cycle, which is allowed — it can be an art decision — but it says so rather than letting you find out later.
 
 ### Playback
 
-**▶** or **space**. The fps box sets the rate.
+**▶** or **space**. The fps box sets the rate and is included with save/load
 
 The playhead is a clock, not a loop — it counts up, and each lane wraps on its own period. There is no shared wrap point, so the composite stays continuous however the periods relate.
 
@@ -599,7 +605,6 @@ If nothing active loops — only one-shots — playback runs to the end and stop
 | wheel | zoom (toward the cursor) |
 | drag filled circle | move a bone's root |
 | drag hollow circle | aim + set length |
-| drag tick | rotate a zero-length bone |
 | shift while aiming | snap to 45° |
 | drag on the ruler | scrub |
 | double-click a name | rename |
@@ -609,9 +614,9 @@ If nothing active loops — only one-shots — playback runs to the end and stop
 | | |
 |---|---|
 | `` ` `` | cycle rest → solve → pose → anim |
-| `[` `]` | nudge angle 1° (shift: 10°) |
 | `space` | play/pause *(anim mode)* |
 | `←` `→` | step the playhead 1 frame (shift: 5) *(anim mode)* |
+| `↑` `↓` | increment/decrement an input field (shift for fine control) |
 | `delete` | remove the selection |
 | `cmd/ctrl+Z` | undo — `shift` to redo |
 
@@ -626,7 +631,7 @@ back to world rather than vanishing.
 
 | file | what it is |
 |---|---|
-| `skeleton.yaml` | engine-facing. Rest configuration flattened to world space, degrees. Per bone: pose delta, solution delta, constraint definition. Per animation: authored keyframes *and* baked channels' deltas.  (All deltas relative not world)|
+| `skeleton.yaml` | engine-facing. Rest configuration flattened to world space, degrees. Per bone: pose delta, solution delta, constraint definition. Per animation: authored keyframes, ghosts, *and* baked channels' deltas.  (All deltas relative not world)|
 | `rig.json` | the authoring graph — refs, anchors, inline markup. |
 | `art/*.svg` | every graphic with its anchors written in. |
 

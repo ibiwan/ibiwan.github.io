@@ -36,9 +36,13 @@ export function exportYaml(doc, artPaths = null) {
     '#',
     '# solve_offset and animation keyframe deltas are both triples ordered',
     '# [angle, offset_x, offset_y]. keyframe deltas are measured FROM REST.',
-    '# frames between keys interpolate linearly; animations that overlap on a',
-    '# bone add, so composition order does not matter. a forward loop wraps from',
-    '# its last key to frame 0; back-and-forth reverses at its last frame.',
+    '# frames between keys interpolate linearly, and an angle travels the literal',
+    '# difference between its two keys -- 0 to 900 is two and a half turns, and',
+    '# nothing takes a shortest arc. animations that overlap on a bone add, so',
+    '# composition order does not matter.',
+    '#',
+    '# a forward loop closes from its last key to frame 0, or to `ghost` where',
+    '# that names the bone. back-and-forth reverses at its last frame.',
     '#',
     '# each animation carries BOTH: `keyframes` is what was authored, `baked` is',
     '# the same motion with constraints already solved, split per bone per',
@@ -63,14 +67,11 @@ export function exportYaml(doc, artPaths = null) {
     out.push(`    pos: [${fmt(f.pos.x, 3)}, ${fmt(f.pos.y, 3)}]`);
     out.push(`    angle: ${fmt(wrapDeg(f.angle), 3)}`);
     out.push(`    length: ${fmt(b.length, 3)}`);
-    // The pose delta is part of the rig, not a preview aid: the model is
-    // rest + pose + animation. It lives HERE rather than inside the baked
-    // animations because each animation is baked in isolation -- carrying it
-    // there would make the engine add it once per active animation.
+    // Part of the rig, not a preview aid. It lives HERE rather than inside the
+    // baked animations, which are baked in isolation (bug #3).
     if (Math.abs(b.poseAngle ?? 0) > 1e-9) out.push(`    pose_angle: ${fmt(wrapDeg(b.poseAngle), 3)}`);
-    // What the constraints do with nothing animating. A CONSTANT, so it lives
-    // here and is added once -- carrying it inside each animation is what made
-    // two active lanes apply it twice.
+    // What the constraints do with nothing animating. A CONSTANT, added once
+    // (bug #2).
     const z = standing[b.id];
     if (z) out.push(`    solve_offset: [${fmt(z.angle, 3)}, ${fmt(z.offsetX, 3)}, ${fmt(z.offsetY, 3)}]`);
 
@@ -139,6 +140,18 @@ export function exportYaml(doc, artPaths = null) {
         }
       } else {
         out.push('        deltas: {}');
+      }
+    }
+
+    // The ghost: where a forward loop's seam arrives, per bone. Travel is
+    // literal, so without an entry a bone runs to frame 0's value -- 270 back
+    // to 0 unwinds. An entry of 360 is how "carry on round" is written down.
+    // Only in `keyframes` terms; `baked` already has it resolved into samples.
+    const ghost = Object.entries(anim.ghost ?? {});
+    if (anim.type === 'forward' && ghost.length) {
+      out.push('    ghost:');
+      for (const [boneId, d] of ghost) {
+        out.push(`      ${boneId}: [${fmt(d.angle, 3)}, ${fmt(d.offsetX, 3)}, ${fmt(d.offsetY, 3)}]`);
       }
     }
 

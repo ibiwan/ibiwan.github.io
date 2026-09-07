@@ -9,7 +9,7 @@ const LS_KEY = 'tauroid.rigger.doc';
 const HISTORY_LIMIT = 200;
 
 // bump when the document shape changes.
-export const SCHEMA = 16;
+export const SCHEMA = 18;
 
 // The oldest schema this build can bring forward.
 //
@@ -155,11 +155,24 @@ export const normalizeSelection = (sel) => {
   if (!sel) return null;
   if (typeof sel === 'string') return { kind: 'bone', id: sel };
   if (sel.kind === 'keyframe' && sel.animId != null) return sel;
+  // the ghost belongs to the animation, not to a frame -- it has no frame to
+  // belong to, being one past the last one that exists
+  if (sel.kind === 'ghost' && sel.animId != null) return { kind: 'ghost', animId: sel.animId };
   if (sel.kind === 'anim' && sel.id != null) return sel;
   return sel.id ? { kind: sel.kind === 'art' ? 'art' : 'bone', id: sel.id } : null;
 };
 
 export class SchemaError extends Error {}
+
+// How a pre-v17 segment travelled: shortest arc, or a full turn either side of
+// it when the key forced a direction. Retained ONLY so the v17 migration can
+// read what an old document meant -- nothing else may call it.
+function legacyTurn(from, to, turn) {
+  const short = ((((to - from) % 360) + 540) % 360) - 180;
+  if (turn === 'inc') return short > 0 ? short : short + 360;
+  if (turn === 'dec') return short < 0 ? short : short - 360;
+  return short;
+}
 
 export function normalizeDoc(doc) {
   if (!doc || !Array.isArray(doc.bones)) return null;
@@ -290,11 +303,24 @@ export function normalizeDoc(doc) {
       ? anim.length : 12;
     anim.active = anim.active === true;
     anim.keyframes = Array.isArray(anim.keyframes) ? anim.keyframes : [];
+
+    // v18: fenceposts. A duration of N is N intervals, so there are N+1 posts,
+    // at frames 0..N. A back-and-forth's apex belongs on post N; sitting it on
+    // N-1 shared the apex and the trough between the two legs and made the
+    // period 2N-2, which is why a 15-frame jounce ran at 28 and drifted.
+    //
+    // A forward loop is the exception, and already correct: its post N IS post
+    // 0, so its keys stop at N-1 and the ghost speaks for the last post.
+    const lastPost = anim.type === 'forward' ? anim.length - 1 : anim.length;
+    if (version < 18 && anim.type !== 'forward') {
+      // carry the end key out to its proper post, keeping the authored duration
+      const end = anim.keyframes.find((k) => k.frame === anim.length - 1);
+      if (end && !anim.keyframes.some((k) => k.frame === anim.length)) end.frame = anim.length;
+    }
+
     for (const kf of anim.keyframes) {
-      kf.frame = Number.isFinite(kf.frame) ? Math.max(0, Math.min(kf.frame, anim.length - 1)) : 0;
+      kf.frame = Number.isFinite(kf.frame) ? Math.max(0, Math.min(kf.frame, lastPost)) : 0;
       kf.deltas = kf.deltas && typeof kf.deltas === 'object' ? kf.deltas : {};
-      // v14: how this key's angles rotate toward the next one
-      kf.turn = ['auto', 'inc', 'dec'].includes(kf.turn) ? kf.turn : 'auto';
       for (const [boneId, d] of Object.entries(kf.deltas)) {
         if (!live.has(boneId)) { delete kf.deltas[boneId]; continue; }
         d.angle = Number.isFinite(d.angle) ? d.angle : 0;
@@ -302,10 +328,9 @@ export function normalizeDoc(doc) {
         d.offsetY = Number.isFinite(d.offsetY) ? d.offsetY : 0;
       }
     }
-    // ensure start keyframe exists
-    if (!anim.keyframes.some((k) => k.frame === 0)) {
-      anim.keyframes.unshift({ frame: 0, deltas: {}, turn: 'auto' });
-    }
+    // Nothing is mandatory: posts 0 and N are implicit zeros unless a key
+    // says otherwise, so an animation with no keys at all is well defined and
+    // simply contributes nothing.
     anim.keyframes.sort((a, b) => a.frame - b.frame);
   }
 
@@ -317,6 +342,49 @@ export function normalizeDoc(doc) {
   doc.fps = Number.isFinite(doc.fps) && doc.fps > 0
     ? Math.max(1, Math.min(60, Math.round(doc.fps)))
     : 12;
+
+  // v17: `turn` becomes the values themselves, plus a ghost key on the seam.
+  //
+  // Both halves are exact, because `turn` is precisely the information wrapped
+  // values are missing. Read every original before writing anything: the seam
+  // is computed from the ORIGINAL last and first values, and unwrapping is
+  // about to overwrite them.
+  for (const anim of doc.animations) {
+    anim.ghost = anim.ghost && typeof anim.ghost === 'object' ? anim.ghost : {};
+    if (!anim.keyframes.length) continue;
+
+    const keys = [...anim.keyframes].sort((a, b) => a.frame - b.frame);
+    const last = keys[keys.length - 1];
+    const first = keys[0];
+    const bones = new Set(keys.flatMap((k) => Object.keys(k.deltas)));
+
+    for (const id of bones) {
+      const orig = keys.map((k) => k.deltas[id]?.angle ?? 0);
+      const turns = keys.map((k) => k.turn);
+
+      // walk the segments, accumulating what each one actually travelled
+      const unwrapped = [orig[0]];
+      for (let i = 1; i < keys.length; i += 1) {
+        unwrapped.push(unwrapped[i - 1] + legacyTurn(orig[i - 1], orig[i], turns[i - 1]));
+      }
+      keys.forEach((k, i) => { if (k.deltas[id]) k.deltas[id].angle = unwrapped[i]; });
+
+      // the seam: where the last key's outgoing segment was headed. Equal to
+      // frame 0's value means the plain closing case, which needs no override.
+      if (anim.type !== 'forward' || anim.ghost[id]) continue;
+      const from = unwrapped[unwrapped.length - 1];
+      const target = from + legacyTurn(orig[orig.length - 1], orig[0], last.turn);
+      const start = first.deltas[id] ?? { angle: 0, offsetX: 0, offsetY: 0 };
+      // the seam travels literally now, so whatever the old shortest-arc rule
+      // did has to be written down. Most loops therefore gain a ghost, which is
+      // not a cost -- it is a direction becoming visible instead of implied.
+      if (Math.abs(target - start.angle) > 1e-9) {
+        anim.ghost[id] = { angle: target, offsetX: start.offsetX, offsetY: start.offsetY };
+      }
+    }
+
+    for (const k of anim.keyframes) delete k.turn;
+  }
 
   doc.selection = normalizeSelection(doc.selection);
   doc.nextId ??= doc.bones.length + doc.art.length + (doc.animations?.length ?? 0) + 1;

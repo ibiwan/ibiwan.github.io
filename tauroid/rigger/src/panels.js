@@ -9,12 +9,26 @@ import {
 import { artById, anchorNamed } from './art.js';
 import { fmt, wrapDeg } from './math.js';
 import {
-  makeDelta, animById, needsEndFrame, setLength, ensureEndpoints, poseAt,
+  makeDelta, animById, needsEndFrame, setLength, ensureEndpoints, poseAt, loopPeriod,
 } from './animation.js';
 
 const selBone = (doc, id) => doc.selection?.kind === 'bone' && doc.selection.id === id;
 const selArt = (doc, id) => doc.selection?.kind === 'art' && doc.selection.id === id;
 const selAnim = (doc, id) => doc.selection?.kind === 'anim' && doc.selection.id === id;
+
+// Art scale is multiplicative, so its control is logarithmic and its stepping
+// proportional -- equal travel is equal doubling, and 1 sits at mid-track.
+//
+// Both controls share this range and both clamp to it (bug #9).
+const S_MIN = 0.05;
+const S_MAX = 20;
+const S_SPAN = Math.log(S_MAX / S_MIN);
+const clampScale = (v) => Math.min(S_MAX, Math.max(S_MIN, v));
+const scalePos = (v) => Math.round(1000 * Math.log(clampScale(v) / S_MIN) / S_SPAN);
+const scaleAt = (p) => S_MIN * Math.exp((Number(p) / 1000) * S_SPAN);
+// 2dp is too coarse at the small end: 2% of 0.05 rounds away to nothing, so a
+// fine step would stall instead of moving
+const fmtScale = (v) => fmt(v, v < 1 ? 3 : 2);
 
 export function createHierarchy(root, store, { onRename } = {}) {
   function render(doc) {
@@ -70,10 +84,35 @@ export function createInspector(root, store, { onDownload } = {}) {
     // overridable rather than being the visible text
     input.dataset.field = opts.key ?? label;
     if (opts.min != null) input.min = opts.min;
+    if (opts.max != null) input.max = opts.max;
     if (opts.disabled) input.disabled = true;
     input.value = value;
     // commit on change, not input, so partially-typed numbers don't thrash
     input.onchange = () => onCommit(input.type === 'number' ? Number(input.value) : input.value);
+
+    // Shift-arrow steps a TENTH as far, matching art scale where shift is 2%
+    // against a plain 20%. Shift means finer everywhere, not finer in one panel
+    // and coarser in another.
+    //
+    // Only shift is intercepted: the browser's own arrow stepping is already
+    // the right size, and taking it over would mean reimplementing min/max
+    // clamping for nothing.
+    //
+    // These are ADDITIVE quantities, so a fixed step is right at every
+    // magnitude. Art scale is multiplicative and steps by a proportion instead;
+    // see the note by S_MIN.
+    if (input.type === 'number') {
+      input.onkeydown = (e) => {
+        if (!e.shiftKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+        e.preventDefault();
+        const fine = (Number(input.step) || 1) / 10;
+        let v = (Number(input.value) || 0) + (e.key === 'ArrowUp' ? fine : -fine);
+        if (opts.min != null) v = Math.max(Number(opts.min), v);
+        if (opts.max != null) v = Math.min(Number(opts.max), v);
+        input.value = fmt(v, 3);
+        onCommit(Number(input.value));
+      };
+    }
 
     // An optional padlock. This is axis-snapping for the drag, not write
     // protection: a hand cannot move in a perfect orthogonal line or a perfect
@@ -160,8 +199,16 @@ export function createInspector(root, store, { onDownload } = {}) {
     if (sel.kind === 'keyframe') {
       const anim = animById(doc, sel.animId);
       const kf = anim?.keyframes.find((k) => k.frame === sel.frame);
-      return `kf|${sel.animId}|${sel.frame}|${kf?.turn}|`
+      return `kf|${sel.animId}|${sel.frame}|`
         + `${Object.keys(kf?.deltas ?? {}).length}|${doc.bones.length}`;
+    }
+    if (sel.kind === 'ghost') {
+      const anim = animById(doc, sel.animId);
+      // every control here is derived from which bones are keyed and which are
+      // overridden, so both belong in the shape rather than in a value patch
+      const keyed = [...new Set((anim?.keyframes ?? []).flatMap((k) => Object.keys(k.deltas)))];
+      return `ghost|${sel.animId}|${keyed.sort().join(',')}|`
+        + `${Object.keys(anim?.ghost ?? {}).sort().join(',')}`;
     }
     if (sel.kind === 'anim') {
       const anim = animById(doc, sel.id);
@@ -180,7 +227,11 @@ export function createInspector(root, store, { onDownload } = {}) {
       }
     } else {
       const item = artById(doc, sel.id);
-      parts.push((item?.anchors ?? []).length);
+      // patchArt moves values only, so whatever it cannot repaint belongs here
+      // (bug #8): anchor names, the two roles, the hide/show label
+      parts.push((item?.anchors ?? []).map((a) => a.name).join(','));
+      parts.push(item?.origin ?? '-', item?.direction ?? '-');
+      parts.push(item?.visible ? '1' : '0');
       parts.push(refValue(item?.ref));
     }
     return parts.join('|');
@@ -197,9 +248,37 @@ export function createInspector(root, store, { onDownload } = {}) {
     };
   }
 
+  // Moves values only. Anything that changes which CONTROLS exist -- roles,
+  // anchor names, visibility, the ref -- belongs in shapeOf instead, or it
+  // silently stops updating (bug #8).
+  function patchArt(doc) {
+    const item = artById(doc, doc.selection?.id);
+    if (!item) return;
+    const values = {
+      name: item.name,
+      'offset x': fmt(item.offset.x),
+      'offset y': fmt(item.offset.y),
+      angle: fmt(item.angle),
+      scale: fmtScale(item.scale ?? 1),
+    };
+    for (const input of root.querySelectorAll('input[data-field]')) {
+      const next = values[input.dataset.field];
+      if (next === undefined) continue;
+      if (input === document.activeElement) continue;   // don't fight the user
+      if (String(input.value) !== String(next)) input.value = next;
+    }
+    // the slider carries no data-field: its value is a position, not the scale
+    const slider = root.querySelector('.scale-field input[type="range"]');
+    if (slider && slider !== document.activeElement) {
+      const pos = String(scalePos(item.scale ?? 1));
+      if (slider.value !== pos) slider.value = pos;
+    }
+  }
+
   function patchValues(doc, view) {
-    if (doc.selection?.kind === 'art') return renderArt(doc);
+    if (doc.selection?.kind === 'art') return patchArt(doc);
     if (doc.selection?.kind === 'anim') return;
+    if (doc.selection?.kind === 'ghost') return patchGhost(doc);
     if (doc.selection?.kind === 'keyframe') return patchKeyframe(doc);
     const bone = boneById(doc, doc.selection?.id);
     if (!bone) return;
@@ -225,6 +304,7 @@ export function createInspector(root, store, { onDownload } = {}) {
 
     if (doc.selection?.kind === 'art') return renderArt(doc);
     if (doc.selection?.kind === 'anim') return renderAnimProps(doc);
+    if (doc.selection?.kind === 'ghost') return renderGhost(doc);
     if (doc.selection?.kind === 'keyframe') return renderKeyframe(doc);
 
     const bone = boneById(doc, doc.selection?.id);
@@ -503,30 +583,56 @@ export function createInspector(root, store, { onDownload } = {}) {
 
     const slider = document.createElement('input');
     slider.type = 'range';
-    slider.min = '0.1';
-    slider.max = '4';
-    slider.step = '0.01';
-    slider.value = item.scale ?? 1;
+    slider.min = '0';
+    slider.max = '1000';
+    slider.step = '1';
+    slider.value = String(scalePos(item.scale ?? 1));
 
     const readout = document.createElement('input');
     readout.type = 'number';
-    readout.step = '0.01';
-    readout.min = '0.01';
+    // stepping is handled below and is multiplicative, so decline the native
+    // additive one rather than letting the two disagree
+    readout.step = 'any';
+    readout.min = String(S_MIN);
+    readout.max = String(S_MAX);
     readout.dataset.field = 'scale';
     readout.className = 'scale-value';
     readout.value = fmt(item.scale ?? 1);
 
     // dragging coalesces into one undo entry; typing commits its own
     slider.oninput = () => {
-      readout.value = fmt(Number(slider.value));
-      store.update((d) => { artById(d, item.id).scale = Number(slider.value); },
+      const v = fmtScale(scaleAt(slider.value));
+      readout.value = v;
+      store.update((d) => { artById(d, item.id).scale = v; },
         { coalesce: `scale:${item.id}` });
     };
     slider.onchange = () => store.endGesture();
-    readout.onchange = () => {
-      const v = Math.max(0.01, Number(readout.value) || 1);
-      slider.value = String(Math.min(4, Math.max(0.1, v)));
-      edit((a) => { a.scale = v; });
+    // `stepping` groups a run of arrow presses into one undo entry, the way a
+    // slider drag is grouped; a typed value commits on its own
+    const setScale = (v, stepping = false) => {
+      readout.value = fmtScale(v);
+      slider.value = String(scalePos(v));
+      store.update((d) => { artById(d, item.id).scale = v; },
+        stepping ? { coalesce: `scale:${item.id}` } : {});
+    };
+    readout.onchange = () => setScale(clampScale(Number(readout.value) || 1));
+
+    // Arrows step by a PROPORTION, not a fixed amount -- 20%, or 2% with shift.
+    // Scale is multiplicative, so a fixed step is the wrong size at both ends:
+    // 0.01 is a third of a doubling at 0.03 and invisible at 15. Offsets and
+    // angles are additive and keep their fixed steps.
+    //
+    // Down divides rather than subtracting 20%, so up-then-down returns you to
+    // where you started.
+    readout.onkeydown = (e) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      const factor = e.shiftKey ? 1.02 : 1.2;
+      const cur = clampScale(Number(readout.value) || 1);
+      setScale(clampScale(e.key === 'ArrowUp' ? cur * factor : cur / factor), true);
+    };
+    readout.onkeyup = (e) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') store.endGesture();
     };
 
     scaleRow.append(slider, readout);
@@ -675,18 +781,20 @@ export function createInspector(root, store, { onDownload } = {}) {
     typeRow.append(typeSel);
     root.append(typeRow);
 
-    // shortening drops the keys that fall off the end, then re-supplies
-    // whichever endpoints the type still requires
+    // shortening drops the keys that fall off the end, carrying the last post
     root.append(field('length', anim.length, (v) => edit((a) => {
       setLength(a, v);
     }), { min: 2 }));
 
+    // Duration is INTERVALS, so the posts run 0..N. Saying so here is the
+    // cheapest place to stop the off-by-one that made a 15-frame jounce run at
+    // 28 -- the period is what has to line up with other lanes, not the length.
     const info = document.createElement('p');
     info.className = 'note';
-    const endReq = needsEndFrame(anim.type);
-    info.textContent = endReq
-      ? `start (frame 0) and end (frame ${anim.length - 1}) are mandatory`
-      : 'start (frame 0) is mandatory; wraps back to start';
+    const period = loopPeriod(anim);
+    info.textContent = needsEndFrame(anim.type)
+      ? `posts 0..${anim.length}` + (period ? ` \u00b7 out and back over ${period} frames` : ' \u00b7 plays once, then holds')
+      : `posts 0..${anim.length - 1}, then the ghost \u00b7 repeats every ${period} frames`;
     root.append(info);
 
     const actions = document.createElement('div');
@@ -723,6 +831,126 @@ export function createInspector(root, store, { onDownload } = {}) {
     }
   }
 
+
+  // How far the override sits from frame 0, in the terms that matter: a whole
+  // number of turns closes cleanly, anything else pops by the remainder every
+  // cycle. Legal -- it can be an art decision -- but it must not be a surprise.
+  function seamNote(gap) {
+    const turns = gap / 360;
+    const whole = Math.round(turns);
+    if (Math.abs(turns - whole) < 1e-6) {
+      return `${fmt(gap)}\u00b0 \u00b7 ${whole} turn${Math.abs(whole) === 1 ? '' : 's'}`;
+    }
+    return `${fmt(gap)}\u00b0 \u00b7 pops ${fmt(gap - whole * 360)}\u00b0 each cycle`;
+  }
+
+  // Values only, leaving the focused field alone -- shapeOf carries which bones
+  // are keyed and which are overridden, so a rebuild happens when the CONTROLS
+  // change and never merely because a number did. See bug #8.
+  function patchGhost(doc) {
+    const anim = animById(doc, doc.selection?.animId);
+    if (!anim) return;
+    const start = anim.keyframes.find((k) => k.frame === 0)?.deltas ?? {};
+
+    for (const input of root.querySelectorAll('input[data-field^="ghost:"]')) {
+      const [, id, part] = input.dataset.field.split(':');
+      const next = anim.ghost?.[id]?.[part];
+      if (next === undefined || input === document.activeElement) continue;
+      if (String(input.value) !== String(fmt(next))) input.value = fmt(next);
+    }
+    for (const dl of root.querySelectorAll('dl.readout[data-ghost]')) {
+      const id = dl.dataset.ghost;
+      const over = anim.ghost?.[id];
+      if (!over) continue;
+      const gap = over.angle - (start[id]?.angle ?? 0);
+      const dd = dl.querySelector('dd');
+      const note = seamNote(gap);
+      if (dd && dd.textContent !== note) dd.textContent = note;
+    }
+  }
+
+  // The ghost key: where a forward loop's seam arrives, per bone.
+  //
+  // Travel is literal everywhere, so without an override the seam runs to frame
+  // 0's value -- 270 back to 0 unwinds. An override says otherwise, and 360
+  // rather than 0 is how "keep going round" is written down.
+  //
+  // The mismatch readout is the point of the layout: an override that is not a
+  // whole number of turns from frame 0 pops every cycle. That is legal -- it can
+  // be an art decision -- but it has to be visible rather than discovered.
+  function renderGhost(doc) {
+    const anim = animById(doc, doc.selection.animId);
+    root.replaceChildren();
+    if (!anim) return;
+
+    const head = document.createElement('h3');
+    head.className = 'section';
+    head.textContent = `${anim.name} \u00b7 ghost`;
+    root.append(head);
+    root.append(Object.assign(document.createElement('p'), {
+      className: 'note',
+      textContent: 'where the loop closes. never played \u2014 the playhead stops at '
+        + `frame ${anim.length - 1}.`,
+    }));
+
+    const keyed = [...new Set(anim.keyframes.flatMap((k) => Object.keys(k.deltas)))];
+    if (!keyed.length) {
+      root.append(Object.assign(document.createElement('p'),
+        { className: 'empty', textContent: 'Nothing is keyed in this animation yet.' }));
+      return;
+    }
+
+    const start = anim.keyframes.find((k) => k.frame === 0)?.deltas ?? {};
+    const editGhost = (fn) => store.update((d) => {
+      const a = animById(d, doc.selection.animId);
+      if (a) { a.ghost ??= {}; fn(a.ghost); }
+    });
+
+    for (const id of keyed) {
+      const bone = boneById(doc, id);
+      const base = start[id] ?? { angle: 0, offsetX: 0, offsetY: 0 };
+      const over = anim.ghost?.[id] ?? null;
+
+      const boneHead = document.createElement('div');
+      boneHead.className = 'field';
+      boneHead.append(Object.assign(document.createElement('span'),
+        { textContent: bone?.name ?? id, style: 'font-weight: bold' }));
+
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!over;
+      box.title = 'override where this bone arrives';
+      // checking prefills from frame 0, so the starting point IS the reference
+      box.onchange = () => editGhost((g) => {
+        if (box.checked) g[id] = { ...base };
+        else delete g[id];
+      });
+      boneHead.append(box);
+      root.append(boneHead);
+      if (!over) continue;
+
+      for (const [part, label, step] of [
+        ['angle', '\u0394 angle', '1'],
+        ['offsetX', '\u0394 offset x', '0.5'],
+        ['offsetY', '\u0394 offset y', '0.5'],
+      ]) {
+        root.append(field(label, fmt(over[part]),
+          (v) => editGhost((g) => { g[id][part] = v; }),
+          { step, key: `ghost:${id}:${part}` }));
+      }
+
+      const gap = over.angle - base.angle;
+      const dl = document.createElement('dl');
+      dl.className = 'readout';
+      dl.dataset.ghost = id;
+      dl.append(
+        Object.assign(document.createElement('dt'), { textContent: 'vs frame 0' }),
+        Object.assign(document.createElement('dd'), { textContent: seamNote(gap) }),
+      );
+      root.append(dl);
+    }
+  }
+
   function renderKeyframe(doc) {
     const sel = doc.selection;
     const anim = animById(doc, sel.animId);
@@ -735,20 +963,14 @@ export function createInspector(root, store, { onDownload } = {}) {
     head.textContent = `${anim.name} · frame ${kf.frame}`;
     root.append(head);
 
+    // Posts 0 and N are implicit, so a key on one is authored rather than
+    // required -- deleting it returns the post to rest instead of removing it.
     const isStart = kf.frame === 0;
-    const isEnd = needsEndFrame(anim.type) && kf.frame === anim.length - 1;
+    const isEnd = needsEndFrame(anim.type) && kf.frame === anim.length;
     if (isStart || isEnd) {
       root.append(Object.assign(document.createElement('p'),
-        { className: 'note', textContent: isStart ? 'start pose (mandatory)' : 'end pose (mandatory)' }));
+        { className: 'note', textContent: isStart ? 'first post' : 'last post' }));
     }
-
-    // Which segment this key owns. On a forward loop the last key's outgoing
-    // segment is the wrap back to frame 0 -- the one the stored values cannot
-    // describe, since both ends are fixed.
-    const keys = anim.keyframes;
-    const isLast = keys[keys.length - 1]?.frame === kf.frame;
-    const wraps = isLast && anim.type === 'forward';
-    const hasSegment = wraps || !isLast;
 
     const editKf = (fn) => store.update((d) => {
       const a = animById(d, sel.animId);
@@ -756,26 +978,6 @@ export function createInspector(root, store, { onDownload } = {}) {
       if (k) fn(k);
     });
 
-    // angles are directions, so a segment carries a ROTATION -- the stored
-    // values only say where its ends point, and which way round is a choice
-    if (hasSegment) {
-      const turnRow = document.createElement('label');
-      turnRow.className = 'field';
-      turnRow.append(Object.assign(document.createElement('span'),
-        { textContent: wraps ? 'rotate to start' : 'rotate to next' }));
-      const sel2 = document.createElement('select');
-      sel2.title = 'how angles travel across this segment. increasing is '
-        + 'clockwise on screen. a forced direction between equal angles is a '
-        + 'full revolution.';
-      for (const [v, l] of [
-        ['auto', 'short way round'], ['inc', 'increasing (cw)'], ['dec', 'decreasing (ccw)'],
-      ]) {
-        sel2.append(new Option(l, v, false, (kf.turn ?? 'auto') === v));
-      }
-      sel2.onchange = () => editKf((k) => { k.turn = sel2.value; });
-      turnRow.append(sel2);
-      root.append(turnRow);
-    }
 
     // per-bone delta editors, in three tiers:
     //
@@ -784,13 +986,9 @@ export function createInspector(root, store, { onDownload } = {}) {
     //      near the top and ready to fill
     //   2  everything else
     //
-    // Tier 1 is the point. Sorting per keyframe alone made a bone you posed at
-    // frame 0 sink back into the full list at frame 9, so the rows moved under
-    // you as you walked along a lane. Tiering by the whole animation holds them
-    // still: the bones an animation cares about stay together in every one of
-    // its keyframes.
-    //
-    // sort is stable, so bones keep hierarchy order within a tier.
+    // Tiering by the whole animation is what holds the rows still as you walk
+    // along a lane (bug #11). Sort is stable, so hierarchy order survives
+    // within a tier.
     const touched = new Set();
     for (const k of anim.keyframes) for (const id of Object.keys(k.deltas)) touched.add(id);
     const tier = (b) => (kf.deltas[b.id] ? 0 : touched.has(b.id) ? 1 : 2);
@@ -835,8 +1033,8 @@ export function createInspector(root, store, { onDownload } = {}) {
         { className: 'empty', textContent: 'No bones in the rig.' }));
     }
 
-    // delete keyframe (unless it's a mandatory endpoint)
-    const canDelete = !isStart && !isEnd;
+    // every key is deletable now; an endpoint simply falls back to implicit
+    const canDelete = true;
     if (canDelete) {
       const actions = document.createElement('div');
       actions.className = 'row';
@@ -868,9 +1066,71 @@ export function createInspector(root, store, { onDownload } = {}) {
 // the viewer, the way a layers panel reads. there is deliberately no "assets
 // not in scene" state: if it is listed, it is in the scene.
 export function createArtList(root, store, { onRename } = {}) {
-  function render(doc) {
+  // Reordering by drag. The list order IS the z-order, so a drop is the same
+  // splice the buttons already do -- the work is all in surviving the gesture.
+  //
+  // Listeners on `window`, rows measured ONCE at pointerdown -- anything bound
+  // to the row's own element dies mid-drag (bug #5).
+  //
+  // Nothing is committed until release. The in-flight target lives in view
+  // state, which is outside undo -- otherwise dragging across a dozen rows
+  // would be a dozen undo entries and a dozen re-renders of the list.
+  function beginDrag(e, item, index) {
+    if (e.button !== 0) return;
+    const rows = [...root.querySelectorAll('.art-row')].map((r) => {
+      const b = r.getBoundingClientRect();
+      return { top: b.top, mid: b.top + b.height / 2, bottom: b.bottom };
+    });
+    if (rows.length < 2) return;
+
+    // Where would a drop at this pointer position insert? 0..rows.length,
+    // counting gaps rather than rows, so "after the last" is expressible.
+    const slotAt = (y) => {
+      let slot = 0;
+      while (slot < rows.length && y > rows[slot].mid) slot += 1;
+      return slot;
+    };
+
+    let moved = false;
+    const startY = e.clientY;
+
+    const onMove = (ev) => {
+      // a few pixels of slop, so a click that twitches is still a click
+      if (!moved && Math.abs(ev.clientY - startY) < 4) return;
+      moved = true;
+      store.setView((v) => { v.artDrag = { id: item.id, from: index, slot: slotAt(ev.clientY) }; });
+    };
+
+    const onUp = (ev) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      // Clear view state ONLY if a drag actually started. A plain click never
+      // set it, and clearing it anyway re-renders the list -- which removes
+      // this row before the browser's `click` can reach it, eating the
+      // selection the click was for. See bug #18.
+      if (!moved) return;
+      store.setView((v) => { v.artDrag = null; });
+
+      const slot = slotAt(ev.clientY);
+      // removing the row first shifts every slot after it down by one
+      const to = slot > index ? slot - 1 : slot;
+      if (to === index) return;
+      store.update((d) => {
+        const from = d.art.findIndex((a) => a.id === item.id);
+        if (from < 0) return;
+        const [it] = d.art.splice(from, 1);
+        d.art.splice(Math.min(to, d.art.length), 0, it);
+      });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function render(doc, view) {
     root.replaceChildren();
     const art = doc.art ?? [];
+    const drag = view?.artDrag ?? null;
 
     if (!art.length) {
       root.append(Object.assign(document.createElement('p'), {
@@ -884,6 +1144,12 @@ export function createArtList(root, store, { onRename } = {}) {
       row.className = 'art-row' + (selArt(doc, item.id) ? ' selected' : '')
         + (item.visible ? '' : ' hidden-item');
 
+      if (drag) {
+        if (drag.id === item.id) row.className += ' dragging';
+        if (drag.slot === i) row.className += ' drop-before';
+        if (drag.slot === art.length && i === art.length - 1) row.className += ' drop-after';
+      }
+
       const name = document.createElement('button');
       name.className = 'art-name';
       name.textContent = item.name;
@@ -891,6 +1157,8 @@ export function createArtList(root, store, { onRename } = {}) {
       const select = () => store.update((d) => { d.selection = { kind: 'art', id: item.id }; });
       name.onclick = select;
       name.ondblclick = () => { select(); onRename?.(); };
+      // measure BEFORE selecting: select rebuilds these rows (bug #10)
+      name.onpointerdown = (e) => beginDrag(e, item, i);
       row.append(name);
 
       const move = (delta) => {

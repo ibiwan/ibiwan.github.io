@@ -25,16 +25,19 @@ function pxPerFrame(root, frames) {
 }
 
 // Everything that decides WHICH elements exist. The playhead moving is not in
-// here on purpose: rebuilding on every frame would destroy the element holding
-// the drag's pointer capture -- which is exactly what made scrubbing land its
-// first click and then die -- and would rebuild the whole pane 60 times a
-// second during playback.
+// here on purpose: rebuilding every frame would destroy the element holding the
+// drag's pointer capture (bug #5), and would rebuild the pane 60 times a second
+// during playback.
 function structureOf(doc, view, anims, px) {
   const sel = doc.selection;
-  const selKey = sel?.kind === 'keyframe' ? `${sel.animId}@${sel.frame}`
+  const selKey = sel?.kind === 'ghost' ? `ghost@${sel.animId}`
+    : sel?.kind === 'keyframe' ? `${sel.animId}@${sel.frame}`
     : (sel?.kind === 'anim' ? `a:${sel.id}` : '-');
   const lanes = anims.map((a) => `${a.id}:${a.name}:${a.type}:${a.length}:`
-    + a.keyframes.map((k) => `${k.frame}/${Object.keys(k.deltas).length}`).join(','));
+    + a.keyframes.map((k) => `${k.frame}/${Object.keys(k.deltas).length}`).join(',')
+    // the ghost dot is marked when it overrides anything, so its count is
+    // part of what decides how this lane looks
+    + `:g${Object.keys(a.ghost ?? {}).length}`);
   return `${view.mode}|${px.toFixed(3)}|${selKey}|${lanes.join('|')}`;
 }
 
@@ -132,10 +135,8 @@ function ruler(frames, width, px, store, title) {
 
   // Scrub: press and drag anywhere on the ruler.
   //
-  // The move/up listeners go on WINDOW, not on the track, and the track's
-  // geometry is snapshotted at pointerdown -- the same trick the art-anchor
-  // drag uses. Element-bound capture would be lost the moment anything
-  // rebuilt this row, and the drag would silently stop after its first frame.
+  // Listeners on WINDOW and geometry snapshotted at pointerdown -- element-bound
+  // capture is lost the moment anything rebuilds this row (bug #5).
   track.onpointerdown = (e) => {
     e.preventDefault();
     const left = track.getBoundingClientRect().left;
@@ -202,12 +203,35 @@ function lane(doc, anim, frames, px, store) {
     }
   }
 
+  // Posts 0 and N are implicit zeros unless a key covers them, so draw them --
+  // a zero is not an absence, and the extent has to read at a glance. Grey,
+  // because "defaulted" and "authored" are different things to know.
+  const implicitPosts = anim.type === 'forward' ? [0] : [0, anim.length];
+  for (const f of implicitPosts) {
+    if (anim.keyframes.some((k) => k.frame === f)) continue;
+    const dot = document.createElement('div');
+    dot.className = 'keyframe-dot implicit';
+    dot.style.left = `${f * px}px`;
+    dot.title = `frame ${f} \u00b7 implicit rest \u2014 click to key it`;
+    dot.onclick = (e) => {
+      e.stopPropagation();
+      store.setView((v) => { v.frame = f; });
+      store.update((d) => {
+        const a = d.animations.find((x) => x.id === anim.id);
+        if (!a) return;
+        if (!a.keyframes.some((k) => k.frame === f)) {
+          a.keyframes.push(makeKeyframe(f));
+          a.keyframes.sort((x, y) => x.frame - y.frame);
+        }
+        d.selection = { kind: 'keyframe', animId: anim.id, frame: f };
+      });
+    };
+    track.append(dot);
+  }
+
   for (const kf of anim.keyframes) {
     const dot = document.createElement('div');
     dot.className = 'keyframe-dot';
-    if (kf.frame === 0 || (needsEndFrame(anim.type) && kf.frame === anim.length - 1)) {
-      dot.classList.add('endpoint');
-    }
     if (doc.selection?.kind === 'keyframe'
       && doc.selection.animId === anim.id
       && doc.selection.frame === kf.frame) {
@@ -227,6 +251,28 @@ function lane(doc, anim, frames, px, store) {
       });
     };
     track.append(dot);
+  }
+
+  // The ghost, one frame past the end of a forward loop. It is not a keyframe:
+  // the playhead cannot reach frame `length`, so this is a tween target and
+  // nothing else. Drawn hollow, and outside the extent bar, to say so.
+  if (anim.type === 'forward') {
+    const ghost = document.createElement('div');
+    ghost.className = 'keyframe-dot ghost';
+    const overrides = Object.keys(anim.ghost ?? {}).length;
+    if (overrides) ghost.classList.add('overridden');
+    if (doc.selection?.kind === 'ghost' && doc.selection.animId === anim.id) {
+      ghost.classList.add('selected');
+    }
+    ghost.style.left = `${anim.length * px}px`;
+    ghost.title = overrides
+      ? `where the loop closes \u2014 ${overrides} bone${overrides === 1 ? '' : 's'} overridden`
+      : 'where the loop closes \u2014 click to override a bone';
+    ghost.onclick = (e) => {
+      e.stopPropagation();
+      store.update((d) => { d.selection = { kind: 'ghost', animId: anim.id }; });
+    };
+    track.append(ghost);
   }
 
   // click empty track to key at that frame -- within the animation's own

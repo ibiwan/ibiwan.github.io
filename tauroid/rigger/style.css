@@ -262,6 +262,13 @@ body:not(.mode-pose):not(.mode-anim):not(.mode-solve) .layer-pose { opacity: .45
 .art-row.selected { background: #2b4a7d; }
 .art-row.hidden-item .art-name { opacity: .45; text-decoration: line-through; }
 
+/* drag to reorder: the row being moved fades, and a rule marks where it lands */
+.art-row.dragging { opacity: .4; }
+.art-row.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.art-row.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
+.art-name { cursor: grab; }
+.art-row.dragging .art-name { cursor: grabbing; }
+
 .art-name {
   flex: 1;
   min-width: 0;
@@ -511,6 +518,21 @@ body.mode-anim .anim-section[hidden] { display: revert; }
    the other place the tool marks "this end is not yours to remove" */
 .keyframe-dot.endpoint { background: var(--tip); }
 .keyframe-dot.selected { background: #fff; border-color: var(--accent); }
+
+/* An implicit post: frame 0 or frame N with no key on it. A real, played frame
+   whose value is rest -- so it is drawn, but muted, because nobody authored it. */
+.keyframe-dot.implicit { background: var(--dim); }
+.keyframe-dot.implicit:hover { background: var(--text); }
+
+/* The ghost: a forward loop's seam target, one frame past the end. Hollow, and
+   drawn outside the extent bar, because the playhead can never land on it --
+   it is where the loop closes, not a frame you can visit. */
+.keyframe-dot.ghost {
+  background: none;
+  border: 1.5px dashed var(--dim);
+}
+.keyframe-dot.ghost.overridden { border-color: var(--tip); border-style: solid; }
+.keyframe-dot.ghost.selected { background: none; border-color: #fff; }
 
 .playhead {
   position: absolute;

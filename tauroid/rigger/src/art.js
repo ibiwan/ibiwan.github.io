@@ -1,6 +1,6 @@
 // art in scene.
 //
-// an art item is a piece of svg placed on a bone. items are independent: each
+// a graphic is a piece of svg placed on an anchor. items are independent: each
 // owns its own copy of the markup, so dropping the same file in twice gives
 // two items that share nothing. there is no asset library and no "uploaded but
 // unused" state -- if it is in the list, it is in the scene.
@@ -67,9 +67,8 @@ export function parseArt(svgText) {
 }
 
 // The region an <svg> clips itself to. Hoisting its children into a <g> drops
-// that clip, so content drawn outside the viewBox -- which a browser would
-// never show -- starts bleeding over neighbouring art at this item's z. We
-// have to reinstate it by hand.
+// that clip, and content outside the viewBox bleeds over neighbouring art
+// (bug #14) -- so reinstate it by hand.
 export function clipRect(root) {
   const vb = (root.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
   if (vb.length === 4 && vb.every((n) => Number.isFinite(n)) && vb[2] > 0 && vb[3] > 0) {
@@ -85,10 +84,8 @@ export function clipRect(root) {
 
 // Rewrite every id in a fragment so two copies of one file cannot collide.
 //
-// url(#grad) resolves to the FIRST matching id in the document, so without
-// this the second copy of a file silently borrows the first's gradients,
-// clipPaths and filters -- which reads as z-order weirdness because the
-// borrowed clip is positioned for the other item.
+// url(#grad) resolves to the FIRST matching id in the document, so without this
+// the second copy borrows the first's gradients and clips (bug #15).
 export function namespaceIds(root, prefix) {
   const map = new Map();
   for (const el of root.querySelectorAll('[id]')) {
@@ -122,14 +119,10 @@ export function namespaceIds(root, prefix) {
 
 // Confine a fragment's <style> rules to that fragment.
 //
-// CSS inside an inlined <svg> is DOCUMENT-scoped, not element-scoped. Editors
-// export generic class names -- Illustrator emits .st0, .st1, ... for every
-// file -- so several pieces of art in one document all define the same
-// selectors and the LAST one in document order wins for all of them. Since z
-// order is document order, reordering art silently recolours other pieces.
-//
-// Prefixing every selector with a per-item scope class makes each file's rules
-// apply only to its own content.
+// CSS inside an inlined <svg> is DOCUMENT-scoped, so files sharing selector
+// names (Illustrator's .st0, .st1) fight and the last in document order wins.
+// Since z order IS document order, restacking recolours art (bug #16).
+// Prefixing every selector with a per-item scope class confines each file.
 export function scopeStyles(root, scopeClass, rewriteUrls) {
   for (const style of root.querySelectorAll('style')) {
     const scoped = style.textContent.replace(
@@ -286,15 +279,12 @@ export function anchorWorld(item, boneFrame, anchorName) {
     // the art's, which is what makes a bone on a weapon's grip turn with the
     // weapon.
     //
-    // That direction is the one the ORIGIN->DIRECTION anchors define, which in
-    // world terms is the host frame plus `item.angle` -- the angle you asked
-    // the art to point at. Returning `spin` instead reported the art's
-    // correction rather than its facing, so art whose anchors ran at 30 degrees
-    // in its own coordinates handed every anchor an angle 30 degrees out.
+    // That direction is the host frame plus `item.angle` -- the angle you asked
+    // the art to point at. Returning `spin` reports the correction instead
+    // (bug #17).
     //
-    // No special case is needed for a missing or coincident direction anchor:
-    // artDirection is 0 there, so spin collapses to item.angle and the two
-    // agree anyway.
+    // No special case for a missing or coincident direction anchor: artDirection
+    // is 0 there, so spin collapses to item.angle and the two agree.
     pos: v2(q.x + f.pos.x, q.y + f.pos.y),
     angle: f.angle + item.angle,
   };
